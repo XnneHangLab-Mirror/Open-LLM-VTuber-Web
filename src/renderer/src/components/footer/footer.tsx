@@ -9,7 +9,7 @@ import {
 import { BsMicFill, BsMicMuteFill, BsPaperclip, BsX } from 'react-icons/bs';
 import { IoHandRightSharp } from 'react-icons/io5';
 import { FiChevronDown } from 'react-icons/fi';
-import { memo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { InputGroup } from '@/components/ui/input-group';
 import {
@@ -22,7 +22,12 @@ import { footerStyles } from './footer-styles';
 import AIStateIndicator from './ai-state-indicator';
 import { useFooter } from '@/hooks/footer/use-footer';
 
-// Type definitions
+const MIN_THUMBNAIL_SIZE = 32;
+const MAX_THUMBNAIL_SIZE = 72;
+const THUMBNAIL_GAP = 8;
+const REMOVE_BUTTON_RATIO = 0.34;
+const MAX_ATTACHMENTS = 20;
+
 interface FooterProps {
   isCollapsed?: boolean
   onToggle?: () => void
@@ -49,7 +54,6 @@ interface MessageInputProps {
   attachedCount: number
 }
 
-// Reusable components
 const ToggleButton = memo(({ isCollapsed, onToggle }: ToggleButtonProps) => (
   <Box
     {...footerStyles.footer.toggleButton}
@@ -100,7 +104,7 @@ const MessageInput = memo(({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   return (
-    <Box flex={1} minW="0" display="flex" flexDirection="column" gap="2">
+    <Box flex={1} minW="clamp(280px, 42vw, 760px)" display="flex" flexDirection="column" gap="2">
       <InputGroup>
         <Box position="relative" width="100%">
           <IconButton
@@ -140,7 +144,7 @@ const MessageInput = memo(({
               fontSize="xs"
               color="whiteAlpha.700"
             >
-              {t('footer.attachmentsCount', { count: attachedCount })}
+              {t('footer.attachmentsCount', { count: attachedCount, max: MAX_ATTACHMENTS })}
             </Box>
           )}
         </Box>
@@ -151,7 +155,6 @@ const MessageInput = memo(({
 
 MessageInput.displayName = 'MessageInput';
 
-// Main component
 function Footer({ isCollapsed = false, onToggle }: FooterProps): JSX.Element {
   const { t } = useTranslation();
   const {
@@ -168,6 +171,26 @@ function Footer({ isCollapsed = false, onToggle }: FooterProps): JSX.Element {
     micOn,
   } = useFooter();
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [viewportWidth, setViewportWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1280));
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const handleResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const thumbnailSize = useMemo(() => {
+    const count = Math.max(attachedImages.length, 1);
+    const minimumInputWidth = Math.max(320, Math.floor(viewportWidth * 0.28));
+    const estimatedRailWidth = Math.max(240, viewportWidth - minimumInputWidth - 300);
+    const availableWidth = Math.max(estimatedRailWidth, 180);
+    const totalGapWidth = THUMBNAIL_GAP * (count - 1);
+    const size = Math.floor((availableWidth - totalGapWidth) / count);
+    return Math.min(MAX_THUMBNAIL_SIZE, Math.max(MIN_THUMBNAIL_SIZE, size));
+  }, [attachedImages.length, viewportWidth]);
+
+  const removeButtonSize = Math.max(14, Math.floor(thumbnailSize * REMOVE_BUTTON_RATIO));
 
   return (
     <Box {...footerStyles.footer.container(isCollapsed, attachedImages.length > 0)}>
@@ -183,8 +206,9 @@ function Footer({ isCollapsed = false, onToggle }: FooterProps): JSX.Element {
             px="3"
             py="2"
             mb="3"
+            overflowX="hidden"
           >
-            <HStack spacing="2" flexWrap="wrap">
+            <HStack gap={`${THUMBNAIL_GAP}px`} flexWrap="nowrap" align="center">
               {attachedImages.map((image, index) => (
                 <Box
                   key={`${image.data}-${index}`}
@@ -196,6 +220,7 @@ function Footer({ isCollapsed = false, onToggle }: FooterProps): JSX.Element {
                   cursor="zoom-in"
                   role="button"
                   tabIndex={0}
+                  flex={`0 0 ${thumbnailSize}px`}
                   onClick={() => setPreviewImage(image.data)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
@@ -207,18 +232,16 @@ function Footer({ isCollapsed = false, onToggle }: FooterProps): JSX.Element {
                   <Image
                     src={image.data}
                     alt={t('footer.attachFile')}
-                    boxSize="128px"
+                    boxSize={`${thumbnailSize}px`}
                     objectFit="cover"
                   />
                   <IconButton
                     aria-label={t('footer.removeAttachment')}
-                    icon={<BsX />}
-                    size="xs"          // 先用 xs 当基准
-                    w="18px"
-                    h="18px"
-                    minW="18px"        // IconButton 默认有 minW，不设会缩不下去
+                    w={`${removeButtonSize}px`}
+                    h={`${removeButtonSize}px`}
+                    minW={`${removeButtonSize}px`}
                     p="0"
-                    fontSize="12px"    // 控制图标大小（icon 会吃到 fontSize）
+                    fontSize={`${Math.max(10, Math.floor(removeButtonSize * 0.66))}px`}
                     position="absolute"
                     top="1"
                     right="1"
@@ -230,7 +253,9 @@ function Footer({ isCollapsed = false, onToggle }: FooterProps): JSX.Element {
                       event.stopPropagation();
                       handleRemoveAttachment(index);
                     }}
-                  />
+                  >
+                    <BsX />
+                  </IconButton>
                 </Box>
               ))}
             </HStack>

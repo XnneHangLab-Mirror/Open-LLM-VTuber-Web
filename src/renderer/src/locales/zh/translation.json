@@ -70,7 +70,7 @@
     "screenControl": "点击开始屏幕共享",
     "screenStopping": "点击停止屏幕共享",
     "attachFile": "上传文件",
-    "attachmentsCount": "已添加{{count}}个附件",
+    "attachmentsCount": "已添加{{count}}/{{max}}个附件",
     "removeAttachment": "移除附件",
     "previewAttachment": "预览附件"
   },
@@ -126,7 +126,8 @@
     "failedParseWebSocket": "解析WebSocket消息失败",
     "unsupportedFileType": "仅支持上传图片文件",
     "websocketNotOpen": "WebSocket未连接",
-    "vadMisfire": "检测到语音但过于简短，请尝试提高音量或说得更久一些，或调整识别设置（降低语音识别阈值、降低负面语音阈值、减少验证帧数）"
+    "vadMisfire": "检测到语音但过于简短，请尝试提高音量或说得更久一些，或调整识别设置（降低语音识别阈值、降低负面语音阈值、减少验证帧数）",
+    "maxAttachmentsExceeded": "最多只能上传{{max}}个附件"
   },
   "aiState": {
     "idle": "空闲",
@@ -141,4 +142,4 @@
     "connecting": "连接中",
     "clickToReconnect": "点击重新连接"
   }
-} 
+}

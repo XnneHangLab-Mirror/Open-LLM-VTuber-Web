@@ -73,7 +73,7 @@
     "screenControl": "Click to start screen capture",
     "screenStopping": "Click to stop screen capture",
     "attachFile": "Attach file",
-    "attachmentsCount": "{{count}} attachment(s)",
+    "attachmentsCount": "{{count}}/{{max}} attachment(s)",
     "removeAttachment": "Remove attachment",
     "previewAttachment": "Preview attachment"
   },
@@ -129,7 +129,8 @@
     "failedParseWebSocket": "Failed to parse WebSocket message",
     "unsupportedFileType": "Only image files can be attached.",
     "websocketNotOpen": "WebSocket is not open.",
-    "vadMisfire": "Voice detected but too brief. Try speaking louder/longer, or adjust settings (lower speech threshold, lower negative threshold, reduce redemption frames)."
+    "vadMisfire": "Voice detected but too brief. Try speaking louder/longer, or adjust settings (lower speech threshold, lower negative threshold, reduce redemption frames).",
+    "maxAttachmentsExceeded": "You can attach up to {{max}} files."
   },
   "aiState": {
     "idle": "idle",
@@ -144,4 +145,4 @@
     "connecting": "Connecting",
     "clickToReconnect": "Click to Reconnect"
   }
-} 
+}

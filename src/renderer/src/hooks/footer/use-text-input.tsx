@@ -9,6 +9,8 @@ import { toaster } from '@/components/ui/toaster';
 import { useMediaCapture } from '@/hooks/utils/use-media-capture';
 import { ImagePayload } from '@/types/media';
 
+const MAX_ATTACHMENTS = 20;
+
 export function useTextInput() {
   const { t } = useTranslation();
   const [inputText, setInputText] = useState('');
@@ -35,8 +37,27 @@ export function useTextInput() {
   const handleAttachFiles = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
 
+    const remainingSlots = MAX_ATTACHMENTS - attachedImages.length;
+    if (remainingSlots <= 0) {
+      toaster.create({
+        title: t('error.maxAttachmentsExceeded', { max: MAX_ATTACHMENTS }),
+        type: 'warning',
+        duration: 2500,
+      });
+      return;
+    }
+
+    const filesToProcess = Array.from(files).slice(0, remainingSlots);
+    if (files.length > remainingSlots) {
+      toaster.create({
+        title: t('error.maxAttachmentsExceeded', { max: MAX_ATTACHMENTS }),
+        type: 'warning',
+        duration: 2500,
+      });
+    }
+
     const newImages: ImagePayload[] = [];
-    for (const file of Array.from(files)) {
+    for (const file of filesToProcess) {
       if (!file.type.startsWith('image/')) {
         toaster.create({
           title: t('error.unsupportedFileType'),
@@ -66,7 +87,7 @@ export function useTextInput() {
     if (newImages.length > 0) {
       setAttachedImages((prev) => [...prev, ...newImages]);
     }
-  }, [readFileAsDataUrl, t]);
+  }, [attachedImages.length, readFileAsDataUrl, t]);
 
   const handleSend = async () => {
     if (!wsContext) return;
