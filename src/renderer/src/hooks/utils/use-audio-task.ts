@@ -84,10 +84,13 @@ export const useAudioTask = () => {
 
     // Update display text
     if (displayText) {
-      appendText(displayText.text);
-      appendAI(displayText.text, displayText.name, displayText.avatar);
-      if (audioBase64) {
-        updateSubtitle(displayText.text);
+      const renderedText = displayText.text;
+      const isToolStatus = !audioBase64 && renderedText.includes('🔧');
+
+      appendText(renderedText);
+      appendAI(renderedText, displayText.name, displayText.avatar);
+      if (audioBase64 || isToolStatus) {
+        updateSubtitle(renderedText);
       }
       if (!forwarded) {
         sendMessage({
