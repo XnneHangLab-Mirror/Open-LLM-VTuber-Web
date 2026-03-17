@@ -10,6 +10,7 @@ import { useLive2DModel } from "@/hooks/canvas/use-live2d-model";
 import { useLive2DResize } from "@/hooks/canvas/use-live2d-resize";
 import { useAiState, AiStateEnum } from "@/context/ai-state-context";
 import { useLive2DExpression } from "@/hooks/canvas/use-live2d-expression";
+import { useLive2DAppearance } from "@/hooks/canvas/use-live2d-appearance";
 import { useForceIgnoreMouse } from "@/hooks/utils/use-force-ignore-mouse";
 import { useMode } from "@/context/mode-context";
 
@@ -20,12 +21,14 @@ interface Live2DProps {
 export const Live2D = memo(
   ({ showSidebar }: Live2DProps): JSX.Element => {
     const { forceIgnoreMouse } = useForceIgnoreMouse();
-    const { modelInfo, persistentExpression } = useLive2DConfig();
+    const { modelInfo, persistentAppearance } = useLive2DConfig();
     const { mode } = useMode();
     const internalContainerRef = useRef<HTMLDivElement>(null);
     const { aiState } = useAiState();
-    const { setExpression, resetExpression } = useLive2DExpression();
+    const { resetExpression } = useLive2DExpression();
     const isPet = mode === 'pet';
+
+    useLive2DAppearance(modelInfo, persistentAppearance);
 
     // Get canvasRef from useLive2DResize
     const { canvasRef } = useLive2DResize({
@@ -49,15 +52,11 @@ export const Live2D = memo(
     useEffect(() => {
       if (aiState === AiStateEnum.IDLE) {
         const lappAdapter = (window as any).getLAppAdapter?.();
-        if (lappAdapter) {
-          if (persistentExpression !== undefined) {
-            setExpression(persistentExpression, lappAdapter, `Restore persistent appearance: ${persistentExpression}`);
-          } else {
-            resetExpression(lappAdapter, modelInfo);
-          }
+        if (lappAdapter && persistentAppearance === undefined) {
+          resetExpression(lappAdapter, modelInfo);
         }
       }
-    }, [aiState, modelInfo, resetExpression, persistentExpression, setExpression]);
+    }, [aiState, modelInfo, persistentAppearance, resetExpression]);
 
     // Expose setExpression for console testing
     // useEffect(() => {

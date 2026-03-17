@@ -81,8 +81,8 @@ interface Live2DConfigState {
   setModelInfo: (info: ModelInfo | undefined) => void;
   isLoading: boolean;
   setIsLoading: (loading: boolean) => void;
-  persistentExpression?: string | number;
-  setPersistentExpression: (expr: string | number | undefined) => void;
+  persistentAppearance?: string;
+  setPersistentAppearance: (appearance: string | undefined) => void;
 }
 
 /**
@@ -107,7 +107,7 @@ export const Live2DConfigContext = createContext<Live2DConfigState | null>(null)
  */
 export function Live2DConfigProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(DEFAULT_CONFIG.isLoading);
-  const [persistentExpression, setPersistentExpression] = useState<string | number | undefined>(undefined);
+  const [persistentAppearance, setPersistentAppearance] = useState<string | undefined>(undefined);
 
   const [modelInfo, setModelInfoState] = useLocalStorage<ModelInfo | undefined>(
     "modelInfo",
@@ -129,7 +129,7 @@ export function Live2DConfigProvider({ children }: { children: React.ReactNode }
     const finalScale = Number(info.kScale || 0.5) * 2;
     console.log("Setting model info with default scale:", finalScale);
 
-    setPersistentExpression(undefined);
+    setPersistentAppearance(undefined);
     setModelInfoState({
       ...info,
       kScale: finalScale,
@@ -150,10 +150,10 @@ export function Live2DConfigProvider({ children }: { children: React.ReactNode }
       setModelInfo,
       isLoading,
       setIsLoading,
-      persistentExpression,
-      setPersistentExpression,
+      persistentAppearance,
+      setPersistentAppearance,
     }),
-    [modelInfo, isLoading, setIsLoading, persistentExpression],
+    [modelInfo, isLoading, setIsLoading, persistentAppearance],
   );
 
   return (
