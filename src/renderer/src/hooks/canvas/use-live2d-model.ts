@@ -125,7 +125,13 @@ export const useLive2DModel = ({
         const { baseUrl, modelDir, modelFileName } = parseModelUrl(currentUrl);
 
         if (baseUrl && modelDir) {
-          updateModelConfig(baseUrl, modelDir, modelFileName, Number(modelInfo.kScale));
+          updateModelConfig(
+            baseUrl,
+            modelDir,
+            modelFileName,
+            Number(modelInfo.kScale),
+            modelInfo.idleMotionGroupName,
+          );
 
           setTimeout(() => {
             if ((window as any).LAppLive2DManager?.releaseInstance) {
@@ -138,7 +144,7 @@ export const useLive2DModel = ({
         console.error('Error processing model URL:', error);
       }
     }
-  }, [modelInfo?.url, modelInfo?.kScale]);
+  }, [modelInfo?.url, modelInfo?.kScale, modelInfo?.idleMotionGroupName]);
 
   const getModelPosition = useCallback(() => {
     const adapter = (window as any).getLAppAdapter?.();
