@@ -59,7 +59,7 @@ export function updateModelConfig(
   if (kScale !== undefined) {
     CurrentKScale = kScale;
   }
-  CurrentIdleMotionGroupName = idleMotionGroupName ?? 'Idle';
+  CurrentIdleMotionGroupName = idleMotionGroupName ?? null;
   // Update ModelDirSize when ModelDir changes
   ModelDirSize = ModelDir.length;
 }
