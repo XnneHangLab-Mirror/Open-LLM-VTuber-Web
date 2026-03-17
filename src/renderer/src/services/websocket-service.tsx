@@ -80,6 +80,7 @@ export interface MessageEvent {
   forwarded?: boolean;
   display_text?: DisplayText;
   live2d_model?: string;
+  expression?: string | number;
   browser_view?: {
     debuggerFullscreenUrl: string;
     debuggerUrl: string;

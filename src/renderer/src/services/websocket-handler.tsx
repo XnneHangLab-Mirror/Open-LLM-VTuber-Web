@@ -21,6 +21,7 @@ import { useLocalStorage } from '@/hooks/utils/use-local-storage';
 import { useGroup } from '@/context/group-context';
 import { useInterrupt } from '@/hooks/utils/use-interrupt';
 import { useBrowser } from '@/context/browser-context';
+import { useLive2DExpression } from '@/hooks/canvas/use-live2d-expression';
 
 function WebSocketHandler({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
@@ -28,7 +29,7 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
   const [wsUrl, setWsUrl] = useLocalStorage<string>('wsUrl', defaultWsUrl);
   const [baseUrl, setBaseUrl] = useLocalStorage<string>('baseUrl', defaultBaseUrl);
   const { aiState, setAiState, backendSynthComplete, setBackendSynthComplete } = useAiState();
-  const { setModelInfo } = useLive2DConfig();
+  const { setModelInfo, setPersistentExpression } = useLive2DConfig();
   const { setSubtitleText } = useSubtitle();
   const { clearResponse, setForceNewMessage, appendHumanMessage, appendOrUpdateToolCallMessage } = useChatHistory();
   const { addAudioTask } = useAudioTask();
@@ -40,6 +41,7 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
   const autoStartMicOnConvEndRef = useRef(autoStartMicOnConvEnd);
   const { interrupt } = useInterrupt();
   const { setBrowserViewData } = useBrowser();
+  const { setExpression } = useLive2DExpression();
 
   useEffect(() => {
     autoStartMicOnConvEndRef.current = autoStartMicOnConvEnd;
@@ -286,10 +288,18 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
           console.warn('Received incomplete tool_call_status message:', message);
         }
         break;
+      case 'set-live2d-appearance': {
+        const lappAdapter = (window as any).getLAppAdapter?.();
+        if (lappAdapter && message.expression !== undefined) {
+          setExpression(message.expression, lappAdapter, `Set appearance to: ${message.expression}`);
+          setPersistentExpression(message.expression);
+        }
+        break;
+      }
       default:
         console.warn('Unknown message type:', message.type);
     }
-  }, [aiState, addAudioTask, appendHumanMessage, baseUrl, bgUrlContext, setAiState, setConfName, setConfUid, setConfigFiles, setCurrentHistoryUid, setHistoryList, setMessages, setModelInfo, setSubtitleText, startMic, stopMic, setSelfUid, setGroupMembers, setIsOwner, backendSynthComplete, setBackendSynthComplete, clearResponse, handleControlMessage, appendOrUpdateToolCallMessage, interrupt, setBrowserViewData, t]);
+  }, [aiState, addAudioTask, appendHumanMessage, baseUrl, bgUrlContext, setAiState, setConfName, setConfUid, setConfigFiles, setCurrentHistoryUid, setHistoryList, setMessages, setModelInfo, setPersistentExpression, setSubtitleText, startMic, stopMic, setSelfUid, setGroupMembers, setIsOwner, backendSynthComplete, setBackendSynthComplete, clearResponse, handleControlMessage, appendOrUpdateToolCallMessage, interrupt, setBrowserViewData, setExpression, t]);
 
   useEffect(() => {
     wsService.connect(wsUrl);

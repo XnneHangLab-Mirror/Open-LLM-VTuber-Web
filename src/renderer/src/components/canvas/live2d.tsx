@@ -20,11 +20,11 @@ interface Live2DProps {
 export const Live2D = memo(
   ({ showSidebar }: Live2DProps): JSX.Element => {
     const { forceIgnoreMouse } = useForceIgnoreMouse();
-    const { modelInfo } = useLive2DConfig();
+    const { modelInfo, persistentExpression } = useLive2DConfig();
     const { mode } = useMode();
     const internalContainerRef = useRef<HTMLDivElement>(null);
     const { aiState } = useAiState();
-    const { resetExpression } = useLive2DExpression();
+    const { setExpression, resetExpression } = useLive2DExpression();
     const isPet = mode === 'pet';
 
     // Get canvasRef from useLive2DResize
@@ -50,10 +50,14 @@ export const Live2D = memo(
       if (aiState === AiStateEnum.IDLE) {
         const lappAdapter = (window as any).getLAppAdapter?.();
         if (lappAdapter) {
-          resetExpression(lappAdapter, modelInfo);
+          if (persistentExpression !== undefined) {
+            setExpression(persistentExpression, lappAdapter, `Restore persistent appearance: ${persistentExpression}`);
+          } else {
+            resetExpression(lappAdapter, modelInfo);
+          }
         }
       }
-    }, [aiState, modelInfo, resetExpression]);
+    }, [aiState, modelInfo, resetExpression, persistentExpression, setExpression]);
 
     // Expose setExpression for console testing
     // useEffect(() => {
