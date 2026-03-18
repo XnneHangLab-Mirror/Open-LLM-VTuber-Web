@@ -8,6 +8,7 @@ import { useEffect, useRef, useCallback, useState, RefObject } from "react";
 import { ModelInfo } from "@/context/live2d-config-context";
 import { updateModelConfig } from '../../../WebSDK/src/lappdefine';
 import { LAppDelegate } from '../../../WebSDK/src/lappdelegate';
+import { LAppLive2DManager } from '../../../WebSDK/src/lapplive2dmanager';
 import { initializeLive2D } from '@cubismsdksamples/main';
 import { useMode } from '@/context/mode-context';
 
@@ -20,6 +21,8 @@ interface Position {
   x: number;
   y: number;
 }
+
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 // Thresholds for tap vs drag detection
 const TAP_DURATION_THRESHOLD_MS = 200; // Max duration for a tap
@@ -208,6 +211,60 @@ export const useLive2DModel = ({
     return { x, y };
   }, [getCanvasScale]);
 
+  const getPointerModelCoordinates = useCallback((clientX: number, clientY: number) => {
+    const adapter = (window as any).getLAppAdapter?.();
+    const view = LAppDelegate.getInstance().getView();
+    const model = adapter?.getModel();
+    const canvas = canvasRef.current;
+
+    if (!view || !model || !canvas) {
+      return null;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const scaleX = canvas.clientWidth ? canvas.width / canvas.clientWidth : 1;
+    const scaleY = canvas.clientHeight ? canvas.height / canvas.clientHeight : 1;
+    const scaledX = x * scaleX;
+    const scaledY = y * scaleY;
+    const modelX = view._deviceToScreen.transformX(scaledX);
+    const modelY = view._deviceToScreen.transformY(scaledY);
+
+    return {
+      adapter,
+      view,
+      model,
+      canvas,
+      rect,
+      x,
+      y,
+      scaledX,
+      scaledY,
+      modelX,
+      modelY,
+    };
+  }, [canvasRef]);
+
+  const updateMouseFollow = useCallback((clientX: number, clientY: number) => {
+    if (isDragging || isPotentialTapRef.current) {
+      return;
+    }
+
+    const pointer = getPointerModelCoordinates(clientX, clientY);
+    if (!pointer?.model?._modelMatrix) {
+      return;
+    }
+
+    const localX = pointer.model._modelMatrix.invertTransformX(pointer.modelX);
+    const localY = pointer.model._modelMatrix.invertTransformY(pointer.modelY);
+
+    LAppLive2DManager.getInstance().onDrag(
+      clamp(localX, -1, 1),
+      clamp(localY, -1, 1),
+    );
+  }, [getPointerModelCoordinates, isDragging]);
+
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const adapter = (window as any).getLAppAdapter?.();
     if (!adapter || !canvasRef.current) return;
@@ -317,19 +374,19 @@ export const useLive2DModel = ({
     }
     // --- End Continue Drag Logic ---
 
+    // --- Mouse Follow Logic (gaze + head + body follow mouse) ---
+    updateMouseFollow(e.clientX, e.clientY);
+    // --- End Mouse Follow Logic ---
+
     // --- Pet Hover Logic (Unchanged) ---
     if (isPet && !isDragging && !isPotentialTapRef.current && electronApi && adapter && view && model && canvasRef.current) {
-      const canvas = canvasRef.current;
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      const scale = canvas.width / canvas.clientWidth;
-      const scaledX = x * scale;
-      const scaledY = y * scale;
-      const modelX = view._deviceToScreen.transformX(scaledX);
-      const modelY = view._deviceToScreen.transformY(scaledY);
+      const pointer = getPointerModelCoordinates(e.clientX, e.clientY);
+      if (!pointer) {
+        return;
+      }
 
-      const currentHitState = model.anyhitTest(modelX, modelY) !== null || model.isHitOnModel(modelX, modelY);
+      const currentHitState = model.anyhitTest(pointer.modelX, pointer.modelY) !== null
+        || model.isHitOnModel(pointer.modelX, pointer.modelY);
 
       if (currentHitState !== isHoveringModelRef.current) {
         isHoveringModelRef.current = currentHitState;
@@ -337,7 +394,7 @@ export const useLive2DModel = ({
       }
     }
     // --- End Pet Hover Logic ---
-  }, [isPet, isDragging, electronApi, canvasRef]);
+  }, [isPet, isDragging, electronApi, canvasRef, getPointerModelCoordinates, updateMouseFollow]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     const adapter = (window as any).getLAppAdapter?.();
@@ -395,6 +452,11 @@ export const useLive2DModel = ({
       // If dragging and mouse leaves, treat it like a mouse up to end drag
       handleMouseUp({} as React.MouseEvent); // Pass a dummy event or adjust handleMouseUp signature
     }
+
+    if (isPet || !electronApi?.ipcRenderer?.invoke) {
+      LAppLive2DManager.getInstance().onDrag(0.0, 0.0);
+    }
+
     // Reset potential tap if mouse leaves before mouse up
     if (isPotentialTapRef.current) {
       isPotentialTapRef.current = false;
@@ -405,6 +467,40 @@ export const useLive2DModel = ({
       electronApi.ipcRenderer.send('update-component-hover', 'live2d-model', false);
     }
   }, [isPet, isDragging, electronApi, handleMouseUp]);
+
+  useEffect(() => {
+    if (isPet || !electronApi?.ipcRenderer?.invoke) {
+      return undefined;
+    }
+
+    let isDisposed = false;
+
+    const syncCursorFollow = async () => {
+      if (isDisposed || isDragging || isPotentialTapRef.current) {
+        return;
+      }
+
+      try {
+        const cursorPoint = await electronApi.ipcRenderer.invoke('get-cursor-window-point');
+        if (!cursorPoint || isDisposed) {
+          return;
+        }
+
+        updateMouseFollow(cursorPoint.x, cursorPoint.y);
+      } catch (error) {
+        console.error('Failed to sync global cursor for Live2D follow:', error);
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      void syncCursorFollow();
+    }, 33);
+
+    return () => {
+      isDisposed = true;
+      window.clearInterval(intervalId);
+    };
+  }, [isPet, isDragging, electronApi, updateMouseFollow]);
 
   useEffect(() => {
     if (!isPet && electronApi && isHoveringModelRef.current) {

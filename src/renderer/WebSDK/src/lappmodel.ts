@@ -601,6 +601,12 @@ export class LAppModel extends CubismUserModel {
 
     // ドラッグによる目の向きの調整
     this._model.addParameterValueById(this._idParamEyeBallX, this._dragX); // -1から1の値を加える
+    if (this._idParamBodyAngleY) {
+      this._model.addParameterValueById(
+        this._idParamBodyAngleY,
+        this._dragY * 10
+      );
+    }
     this._model.addParameterValueById(this._idParamEyeBallY, this._dragY);
 
     // 呼吸など
@@ -1294,6 +1300,9 @@ export class LAppModel extends CubismUserModel {
       this._idParamBodyAngleX = idManager.getId(
         CubismDefaultParameterId.ParamBodyAngleX
       );
+      this._idParamBodyAngleY = idManager.getId(
+        CubismDefaultParameterId.ParamBodyAngleY
+      );
     } else {
       // Initialize handles with null to avoid undefined errors
       this._idParamAngleX = null;
@@ -1302,6 +1311,7 @@ export class LAppModel extends CubismUserModel {
       this._idParamEyeBallX = null;
       this._idParamEyeBallY = null;
       this._idParamBodyAngleX = null;
+      this._idParamBodyAngleY = null;
     }
 
     if (LAppDefine.MOCConsistencyValidationEnable) {
@@ -1329,6 +1339,7 @@ export class LAppModel extends CubismUserModel {
 
   _hitArea: csmVector<csmRect>;
   _userArea: csmVector<csmRect>;
+  _idParamBodyAngleY: CubismIdHandle;
 
   _idParamAngleX: CubismIdHandle; // パラメータID: ParamAngleX
   _idParamAngleY: CubismIdHandle; // パラメータID: ParamAngleY
