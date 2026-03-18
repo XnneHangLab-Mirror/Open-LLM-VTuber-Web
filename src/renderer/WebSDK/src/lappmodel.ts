@@ -600,14 +600,14 @@ export class LAppModel extends CubismUserModel {
     ); // -10から10の値を加える
 
     // ドラッグによる目の向きの調整
-    this._model.addParameterValueById(this._idParamEyeBallX, this._dragX); // -1から1の値を加える
+    this._model.addParameterValueById(this._idParamEyeBallX, this._dragX * 2.0); // -1から1の値を加える
     if (this._idParamBodyAngleY) {
       this._model.addParameterValueById(
         this._idParamBodyAngleY,
         this._dragY * 10
       );
     }
-    this._model.addParameterValueById(this._idParamEyeBallY, this._dragY);
+    this._model.addParameterValueById(this._idParamEyeBallY, this._dragY * 2.0);
 
     // 呼吸など
     if (this._breath != null) {
