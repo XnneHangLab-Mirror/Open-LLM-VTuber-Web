@@ -48,15 +48,12 @@ export const Live2D = memo(
     useInterrupt();
     useAudioTask();
 
-    // Reset expression to default when AI state becomes idle
+    // Idle only clears the transient expression layer.
     useEffect(() => {
       if (aiState === AiStateEnum.IDLE) {
-        const lappAdapter = (window as any).getLAppAdapter?.();
-        if (lappAdapter && persistentAppearance === undefined) {
-          resetExpression(lappAdapter, modelInfo);
-        }
+        resetExpression();
       }
-    }, [aiState, modelInfo, persistentAppearance, resetExpression]);
+    }, [aiState, resetExpression]);
 
     // Expose setExpression for console testing
     // useEffect(() => {

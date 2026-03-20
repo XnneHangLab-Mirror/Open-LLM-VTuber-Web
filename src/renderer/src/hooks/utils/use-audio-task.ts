@@ -14,9 +14,6 @@ import { DisplayText } from '@/services/websocket-service';
 import { useLive2DExpression } from '@/hooks/canvas/use-live2d-expression';
 import * as LAppDefine from '../../../WebSDK/src/lappdefine';
 
-// Simple type alias for Live2D model
-type Live2DModel = any;
-
 interface AudioTaskOptions {
   audioBase64: string
   volumes: number[]
@@ -104,6 +101,14 @@ export const useAudioTask = () => {
     try {
       // Process audio if available
       if (audioBase64) {
+        if (expressions?.[0] !== undefined) {
+          setExpression(
+            expressions[0],
+            undefined,
+            `Queued transient expression: ${expressions[0]}`,
+          );
+        }
+
         const audioDataUrl = `data:audio/wav;base64,${audioBase64}`;
 
         // Get Live2D manager and model
@@ -126,16 +131,6 @@ export const useAudioTask = () => {
           console.warn('Model does not have _wavFileHandler for lip sync');
         } else {
           console.log('Model has _wavFileHandler available');
-        }
-
-        // Set expression if available
-        const lappAdapter = (window as any).getLAppAdapter?.();
-        if (lappAdapter && expressions?.[0] !== undefined) {
-          setExpression(
-            expressions[0],
-            lappAdapter,
-            `Set expression to: ${expressions[0]}`,
-          );
         }
 
         // Start talk motion
