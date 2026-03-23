@@ -74,6 +74,7 @@ export interface MessageEvent {
   histories?: HistoryInfo[];
   configs?: ConfigFile[];
   message?: string;
+  score?: number;
   members?: string[];
   is_owner?: boolean;
   client_uid?: string;
