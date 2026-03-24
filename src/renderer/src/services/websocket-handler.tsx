@@ -39,6 +39,7 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
   const { setSelfUid, setGroupMembers, setIsOwner } = useGroup();
   const { startMic, stopMic, autoStartMicOnConvEnd } = useVAD();
   const autoStartMicOnConvEndRef = useRef(autoStartMicOnConvEnd);
+  const currentTurnIdRef = useRef<string | null>(null);
   const { interrupt } = useInterrupt();
   const { setBrowserViewData } = useBrowser();
   const { setMoodScore } = useMood();
@@ -58,7 +59,8 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
     setCurrentHistoryUid, setMessages, setHistoryList,
   } = useChatHistory();
 
-  const handleControlMessage = useCallback((controlText: string) => {
+  const handleControlMessage = useCallback((message: MessageEvent) => {
+    const controlText = message.text;
     switch (controlText) {
       case 'start-mic':
         console.log('Starting microphone...');
@@ -69,11 +71,14 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
         stopMic();
         break;
       case 'conversation-chain-start':
+        currentTurnIdRef.current = message.turn_id || null;
+        setBackendSynthComplete(false);
         setAiState('thinking-speaking');
         audioTaskQueue.clearQueue();
         clearResponse();
         break;
       case 'conversation-chain-end':
+        currentTurnIdRef.current = null;
         audioTaskQueue.addTask(() => new Promise<void>((resolve) => {
           setAiState((currentState: AiState) => {
             if (currentState === 'thinking-speaking') {
@@ -91,15 +96,13 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
       default:
         console.warn('Unknown control command:', controlText);
     }
-  }, [setAiState, clearResponse, setForceNewMessage, startMic, stopMic]);
+  }, [clearResponse, setAiState, setBackendSynthComplete, startMic, stopMic]);
 
   const handleWebSocketMessage = useCallback((message: MessageEvent) => {
     console.log('Received message from server:', message);
     switch (message.type) {
       case 'control':
-        if (message.text) {
-          handleControlMessage(message.text);
-        }
+        handleControlMessage(message);
         break;
       case 'set-model-and-conf':
         setAiState('loading');
@@ -160,6 +163,10 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
         }
         break;
       case 'audio':
+        if (message.turn_id && currentTurnIdRef.current && message.turn_id !== currentTurnIdRef.current) {
+          console.log('Dropping stale audio payload for old turn:', message.turn_id);
+          break;
+        }
         if (aiState === 'interrupted' || aiState === 'listening') {
           console.log('Audio playback intercepted. Sentence:', message.display_text?.text);
         } else {
@@ -171,6 +178,7 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
             displayText: message.display_text || null,
             expressions: message.actions?.expressions || null,
             forwarded: message.forwarded || false,
+            turnId: message.turn_id,
           });
         }
         break;
@@ -251,7 +259,9 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
         });
         break;
       case 'backend-synth-complete':
-        setBackendSynthComplete(true);
+        if (!message.turn_id || !currentTurnIdRef.current || message.turn_id === currentTurnIdRef.current) {
+          setBackendSynthComplete(true);
+        }
         break;
       case 'conversation-chain-end':
         if (!audioTaskQueue.hasTask()) {

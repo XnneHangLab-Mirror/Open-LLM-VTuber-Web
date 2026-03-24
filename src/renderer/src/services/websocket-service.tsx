@@ -26,6 +26,7 @@ export interface AudioPayload {
   slice_length?: number;
   display_text?: DisplayText;
   actions?: Actions;
+  turn_id?: string;
 }
 
 export interface Message {
@@ -80,6 +81,7 @@ export interface MessageEvent {
   client_uid?: string;
   forwarded?: boolean;
   display_text?: DisplayText;
+  turn_id?: string;
   live2d_model?: string;
   expression?: string | number;
   browser_view?: {

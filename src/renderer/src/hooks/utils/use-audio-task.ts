@@ -22,6 +22,7 @@ interface AudioTaskOptions {
   expressions?: string[] | number[] | null
   speaker_uid?: string
   forwarded?: boolean
+  turnId?: string
 }
 
 interface UseAudioTaskOptions {
@@ -58,6 +59,7 @@ export const useAudioTask = ({ managePlaybackCompletion = false }: UseAudioTaskO
   const isMountedRef = useRef(true);
   const backendSynthCompleteRef = useRef(backendSynthComplete);
   const playbackCompleteAckInFlightRef = useRef(false);
+  const currentTurnIdRef = useRef<string | null>(null);
 
   stateRef.current = {
     aiState,
@@ -91,7 +93,7 @@ export const useAudioTask = ({ managePlaybackCompletion = false }: UseAudioTaskO
       return;
     }
 
-    const { audioBase64, displayText, expressions, forwarded } = options;
+    const { audioBase64, displayText, expressions, forwarded, turnId } = options;
     const isToolStatus = isDisplayOnlyToolStatus(options);
 
     if (displayText) {
@@ -103,6 +105,10 @@ export const useAudioTask = ({ managePlaybackCompletion = false }: UseAudioTaskO
         updateSubtitle(renderedText);
       }
 
+      if (turnId) {
+        currentTurnIdRef.current = turnId;
+      }
+
       // Only real audio playback should be reported as playback start.
       if (!forwarded && audioBase64) {
         console.log(`[PLAYBACK] notifying backend audio task accepted: ${renderedText}`);
@@ -110,6 +116,7 @@ export const useAudioTask = ({ managePlaybackCompletion = false }: UseAudioTaskO
           type: 'audio-play-start',
           display_text: displayText,
           forwarded: true,
+          turn_id: turnId,
         });
       }
     }
@@ -189,6 +196,7 @@ export const useAudioTask = ({ managePlaybackCompletion = false }: UseAudioTaskO
                 type: 'audio-play-began',
                 display_text: displayText ?? undefined,
                 forwarded: true,
+                turn_id: turnId,
               });
             })
             .catch((err) => {
@@ -265,7 +273,7 @@ export const useAudioTask = ({ managePlaybackCompletion = false }: UseAudioTaskO
         }
         stopCurrentAudioAndLipSync();
         console.log('[PLAYBACK] frontend completed all queued audio for current turn');
-        sendMessage({ type: 'frontend-playback-complete' });
+        sendMessage({ type: 'frontend-playback-complete', turn_id: currentTurnIdRef.current || undefined });
         backendSynthCompleteRef.current = false;
         setBackendSynthComplete(false);
       } finally {
