@@ -46,7 +46,7 @@ export const Live2D = memo(
     // Setup hooks
     useIpcHandlers();
     useInterrupt();
-    useAudioTask();
+    useAudioTask({ managePlaybackCompletion: true });
 
     // Idle only clears the transient expression layer.
     useEffect(() => {
