@@ -35,6 +35,15 @@ const DEFAULT_LAYER_WEIGHTS: Record<PoseLayerId, number> = {
   mouse_attention_layer: 0.35,
 };
 
+const ORIENTATION_CHANNELS: LogicalChannel[] = [
+  'head_yaw',
+  'head_pitch',
+  'head_roll',
+  'body_yaw',
+  'gaze_x',
+  'gaze_y',
+];
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
@@ -77,7 +86,8 @@ export class Live2DPoseMixerController {
 
   private getMouseAttentionDragInput(): { x: number; y: number } {
     const layer = this.layers.mouse_attention_layer;
-    if (!layer || layer.weight <= 0) {
+    const layerWeight = layer?.weight;
+    if (!layer || typeof layerWeight !== 'number' || !Number.isFinite(layerWeight) || layerWeight <= 0) {
       return { x: 0, y: 0 };
     }
 
@@ -87,8 +97,12 @@ export class Live2DPoseMixerController {
     const rawY = [values.gaze_y, values.head_pitch]
       .find((value) => typeof value === 'number' && Number.isFinite(value));
 
-    const x = typeof rawX === 'number' ? clamp(rawX, -1, 1) : 0;
-    const y = typeof rawY === 'number' ? clamp(rawY, -1, 1) : 0;
+    // Respect mixer weight amplitude for drag compatibility path:
+    // - weight = 0   => no mouse-attention drag
+    // - weight = 0.5 => half-strength drag
+    // - weight = 1   => full-strength drag
+    const x = typeof rawX === 'number' ? clamp(rawX * layerWeight, -1, 1) : 0;
+    const y = typeof rawY === 'number' ? clamp(rawY * layerWeight, -1, 1) : 0;
     return { x, y };
   }
 
@@ -400,7 +414,25 @@ export class Live2DPoseMixerController {
     // Mixer owns long-lived head/eye/body orientation channels.
     // Future drag/mouse-attention/event layers should enter here as additional layers.
     this.refreshFinalPoseSnapshot();
-    const finalPose = this.lastFinalPose;
+    const finalPose: PoseValues = { ...this.lastFinalPose };
+
+    const isMouseOnlyMode = this.layers.mouse_attention_layer.weight > 0
+      && this.layers.idle_layer.weight <= 0
+      && this.layers.speech_layer.weight <= 0
+      && this.layers.backend_pose_layer.weight <= 0;
+
+    if (isMouseOnlyMode) {
+      ORIENTATION_CHANNELS.forEach((channel) => {
+        const value = finalPose[channel];
+        if (typeof value !== 'number' || !Number.isFinite(value)) {
+          // Mouse-only mode should still pin orientation channels to neutral 0
+          // when pointer data is temporarily unavailable, to avoid inheriting
+          // stale orientation from legacy motions/previous frames.
+          finalPose[channel] = 0;
+        }
+      });
+    }
+
     const poseChannels = Object.keys(finalPose) as LogicalChannel[];
     if (poseChannels.length === 0) {
       return false;

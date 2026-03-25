@@ -514,6 +514,7 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
     sendMessage: wsService.sendMessage.bind(wsService),
     wsState,
     reconnect: () => wsService.connect(wsUrl),
+    disconnect: () => wsService.disconnect(),
     wsUrl,
     setWsUrl,
     baseUrl,
