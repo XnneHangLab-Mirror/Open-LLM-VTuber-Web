@@ -24,7 +24,7 @@ import { useBrowser } from '@/context/browser-context';
 import { useMood } from '@/context/mood-context';
 import { getLive2DPoseMixerController } from '@/hooks/canvas/live2d-pose-mixer-controller';
 import { LOGICAL_CHANNELS, PoseValues } from '@/live2d/mixer/logical-channels';
-import { IdleBankConfig, normalizeIdleBankConfig } from '@/live2d/mixer/recorded-idle-driver';
+import { IdleBankConfig, IdlePlayCommand, normalizeIdleBankConfig } from '@/live2d/mixer/recorded-idle-driver';
 import type { PoseLayerId } from '@/hooks/canvas/live2d-pose-mixer-controller';
 
 function normalizeBackendPose(input: unknown): PoseValues {
@@ -144,6 +144,18 @@ function resolveIdleStateFromMessage(message: MessageEvent): string | null {
 
   if (typeof message.idle_state === 'string' && message.idle_state.trim()) {
     return message.idle_state.trim();
+  }
+
+  return null;
+}
+
+function resolveIdlePlayFromMessage(message: MessageEvent): IdlePlayCommand | string | null {
+  if (message.actions && 'idle_play' in message.actions) {
+    return message.actions.idle_play ?? null;
+  }
+
+  if ('idle_play' in message) {
+    return message.idle_play ?? null;
   }
 
   return null;
@@ -290,6 +302,16 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
       }
     }
 
+    if (
+      (message.actions && 'idle_play' in message.actions)
+      || message.type === 'set-live2d-idle-play'
+      || 'idle_play' in message
+    ) {
+      const controller = getLive2DPoseMixerController();
+      controller.setIdleRuntimeState(resolveIdleStateFromMessage(message));
+      controller.playRecordedIdleClip(resolveIdlePlayFromMessage(message));
+    }
+
     switch (message.type) {
       case 'control':
         handleControlMessage(message);
@@ -303,6 +325,9 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
         break;
       case 'set-live2d-mixer-weights':
         // handled above as a dedicated live2d control message.
+        break;
+      case 'set-live2d-idle-play':
+        // handled above as a dedicated recorded-idle trigger.
         break;
       case 'set-model-and-conf':
         setAiState('loading');

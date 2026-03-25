@@ -8,7 +8,7 @@ import { ConfigFile } from '@/context/character-config-context';
 import { toaster } from '@/components/ui/toaster';
 import { ImagePayload } from '@/types/media';
 import { PoseValues } from '@/live2d/mixer/logical-channels';
-import { IdleBankConfig, IdlePlaybackMode } from '@/live2d/mixer/recorded-idle-driver';
+import { IdleBankConfig, IdlePlaybackMode, IdlePlayCommand } from '@/live2d/mixer/recorded-idle-driver';
 import type { PoseLayerId } from '@/hooks/canvas/live2d-pose-mixer-controller';
 
 export interface DisplayText {
@@ -73,6 +73,7 @@ export interface Actions {
   idle_mode?: IdlePlaybackMode;
   idle_bank?: IdleBankConfig | null;
   idle_state?: string;
+  idle_play?: IdlePlayCommand | string | null;
 }
 
 export interface MessageEvent {
@@ -114,6 +115,7 @@ export interface MessageEvent {
   idle_bank?: IdleBankConfig | null;
   mixer_weights?: Partial<Record<PoseLayerId, number>>;
   mixer_weights_mode?: 'patch' | 'reset';
+  idle_play?: IdlePlayCommand | string | null;
   browser_view?: {
     debuggerFullscreenUrl: string;
     debuggerUrl: string;

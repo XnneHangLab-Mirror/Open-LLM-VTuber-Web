@@ -4,7 +4,7 @@ import {
   Live2DParameterProfile,
 } from '@/live2d/mixer/live2d-parameter-profile';
 import { LogicalChannel, PoseValues } from '@/live2d/mixer/logical-channels';
-import { IdleBankConfig, RecordedIdleDriver } from '@/live2d/mixer/recorded-idle-driver';
+import { IdleBankConfig, IdlePlayCommand, RecordedIdleDriver } from '@/live2d/mixer/recorded-idle-driver';
 import { Mixer, PoseLayer } from '@/live2d/mixer/pose-mixer';
 
 interface PatchedModel {
@@ -257,6 +257,10 @@ export class Live2DPoseMixerController {
     this.recordedIdleDriver.clearIdleBank();
   }
 
+  public playRecordedIdleClip(command: IdlePlayCommand | string | null | undefined): void {
+    this.recordedIdleDriver.playManualClip(command, performance.now() * 0.001);
+  }
+
   public getRecordedIdleState() {
     return this.recordedIdleDriver.getDebugState();
   }
@@ -374,6 +378,7 @@ export class Live2DPoseMixerController {
       getRecordedIdleState: () => this.getRecordedIdleState(),
       setRecordedIdleBank: (bank: IdleBankConfig | null) => this.setRecordedIdleBank(bank),
       clearRecordedIdleBank: () => this.clearRecordedIdleBank(),
+      playRecordedIdleClip: (command: IdlePlayCommand | string | null | undefined) => this.playRecordedIdleClip(command),
       setIdleRuntimeState: (state?: string | null) => this.setIdleRuntimeState(state),
       inspect: () => {
         const debugState = this.getDebugState();

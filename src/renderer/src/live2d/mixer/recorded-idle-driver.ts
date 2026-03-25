@@ -13,6 +13,11 @@ export interface IdleBankConfig {
   mode?: IdlePlaybackMode;
 }
 
+export interface IdlePlayCommand {
+  id?: string;
+  url?: string;
+}
+
 type MotionSegmentType = 0 | 1 | 2 | 3;
 
 interface Motion3Meta {
@@ -409,6 +414,32 @@ export function normalizeIdleBankConfig(input: IdleBankConfig | null | undefined
   };
 }
 
+function normalizeIdlePlayCommand(input: IdlePlayCommand | string | null | undefined): IdlePlayCommand | null {
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (!trimmed) {
+      return null;
+    }
+    if (trimmed.includes('/') || trimmed.includes('\\') || trimmed.includes('.')) {
+      return { url: trimmed };
+    }
+    return { id: trimmed };
+  }
+
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+
+  const id = typeof input.id === 'string' && input.id.trim() ? input.id.trim() : undefined;
+  const url = typeof input.url === 'string' && input.url.trim() ? input.url.trim() : undefined;
+  if (!id && !url) {
+    return null;
+  }
+  return { id, url };
+}
+
+type IdleClipSource = 'bank' | 'manual';
+
 export class RecordedIdleDriver {
   private readonly clipCache = new Map<string, Promise<ParsedIdleClip | null>>();
 
@@ -421,6 +452,8 @@ export class RecordedIdleDriver {
   private activeClip: ParsedIdleClip | null = null;
 
   private activeClipIndex = -1;
+
+  private activeClipSource: IdleClipSource = 'bank';
 
   private previousClipIndex = -1;
 
@@ -465,8 +498,38 @@ export class RecordedIdleDriver {
     this.pushPose({});
   }
 
+  public playManualClip(command: IdlePlayCommand | string | null | undefined, nowSeconds: number): void {
+    const normalized = normalizeIdlePlayCommand(command);
+    if (!normalized || !Number.isFinite(nowSeconds)) {
+      return;
+    }
+
+    const fromBank = normalized.id
+      ? this.bank?.clips.findIndex((clip) => clip.id === normalized.id) ?? -1
+      : -1;
+
+    if (fromBank >= 0 && this.bank) {
+      void this.selectClip(nowSeconds, this.bank.clips[fromBank], fromBank, 'manual');
+      return;
+    }
+
+    if (!normalized.url) {
+      return;
+    }
+
+    const sanitized = sanitizeClip({
+      id: normalized.id,
+      url: normalized.url,
+    });
+    if (!sanitized) {
+      return;
+    }
+
+    void this.selectClip(nowSeconds, sanitized, -1, 'manual');
+  }
+
   public update(nowSeconds: number): void {
-    if (!this.bank || this.bank.clips.length === 0) {
+    if (!this.activeClip && (!this.bank || this.bank.clips.length === 0)) {
       return;
     }
 
@@ -475,7 +538,7 @@ export class RecordedIdleDriver {
     }
 
     if (!this.activeClip) {
-      if (!this.isLoading) {
+      if (!this.isLoading && this.bank && this.bank.clips.length > 0) {
         void this.selectNextClip(nowSeconds);
       }
       return;
@@ -484,7 +547,19 @@ export class RecordedIdleDriver {
     const duration = Math.max(0.001, this.activeClip.durationSeconds);
     let elapsed = nowSeconds - this.activeClipStartTimeSeconds;
     if (elapsed >= duration) {
-      if (this.bank.clips.length === 1 && this.activeClip.loop) {
+      if (this.activeClipSource === 'manual') {
+        this.activeClip = null;
+        this.activeClipIndex = -1;
+        this.activeClipSource = 'bank';
+        if (this.bank && this.bank.clips.length > 0) {
+          void this.selectNextClip(nowSeconds);
+        } else {
+          this.pushPose({});
+        }
+        return;
+      }
+
+      if (this.bank && this.bank.clips.length === 1 && this.activeClip.loop) {
         // 保持播放时间连续（elapsed 回卷），并在输出层做短过渡，
         // 这样边界平滑不会“吃掉”动画时间。
         // 关键点：以最近一次已输出的姿态作为过渡起点，
@@ -521,13 +596,14 @@ export class RecordedIdleDriver {
   }
 
   public getDebugState() {
-    const clip = this.bank?.clips[this.activeClipIndex];
+    const clip = this.activeClipIndex >= 0 ? this.bank?.clips[this.activeClipIndex] : undefined;
     return {
       hasBank: Boolean(this.bank),
       mode: this.bank?.mode ?? null,
       clipCount: this.bank?.clips.length ?? 0,
       isLoading: this.isLoading,
       modelUrl: this.modelUrl ?? null,
+      activeClipSource: this.activeClipSource,
       activeClipIndex: this.activeClipIndex,
       activeClipId: clip?.id ?? null,
       activeClipUrl: clip?.url ?? null,
@@ -542,6 +618,7 @@ export class RecordedIdleDriver {
     this.isLoading = false;
     this.activeClip = null;
     this.activeClipIndex = -1;
+    this.activeClipSource = 'bank';
     this.previousClipIndex = -1;
     this.activeClipStartTimeSeconds = 0;
     this.transitionFromPose = null;
@@ -692,7 +769,38 @@ export class RecordedIdleDriver {
       return;
     }
 
-    const selectedClip = this.bank.clips[nextIndex];
+    await this.selectClip(nowSeconds, this.bank.clips[nextIndex], nextIndex, 'bank');
+  }
+
+  private activateClip(
+    parsedClip: ParsedIdleClip,
+    nowSeconds: number,
+    source: IdleClipSource,
+    clipIndex: number,
+  ): void {
+    const previousPose = this.latestPose;
+
+    if (source === 'bank' && clipIndex >= 0) {
+      this.previousClipIndex = clipIndex;
+    }
+
+    this.activeClipSource = source;
+    this.activeClipIndex = clipIndex;
+    this.activeClip = parsedClip;
+    this.activeClipStartTimeSeconds = nowSeconds;
+    this.transitionFromPose = Object.keys(previousPose).length > 0 ? { ...previousPose } : null;
+    this.transitionStartTimeSeconds = this.transitionFromPose ? nowSeconds : null;
+
+    const initialPose = this.samplePoseWithLoopSeamBlend(parsedClip, 0);
+    this.pushPose(this.transitionFromPose ? blendPose(this.transitionFromPose, initialPose, 0) : initialPose);
+  }
+
+  private async selectClip(
+    nowSeconds: number,
+    selectedClip: IdleBankClip,
+    clipIndex: number,
+    source: IdleClipSource,
+  ): Promise<void> {
     const resolvedUrl = toAbsoluteUrl(selectedClip.url, this.modelUrl);
     if (!resolvedUrl) {
       return;
@@ -712,16 +820,7 @@ export class RecordedIdleDriver {
       return;
     }
 
-    const previousPose = this.latestPose;
-
-    this.previousClipIndex = nextIndex;
-    this.activeClipIndex = nextIndex;
-    this.activeClip = parsedClip;
-    this.activeClipStartTimeSeconds = nowSeconds;
-    this.transitionFromPose = Object.keys(previousPose).length > 0 ? { ...previousPose } : null;
-    this.transitionStartTimeSeconds = this.transitionFromPose ? nowSeconds : null;
-    const initialPose = this.samplePoseWithLoopSeamBlend(parsedClip, 0);
-    this.pushPose(this.transitionFromPose ? blendPose(this.transitionFromPose, initialPose, 0) : initialPose);
+    this.activateClip(parsedClip, nowSeconds, source, clipIndex);
   }
 
   private async loadClip(resolvedUrl: string): Promise<ParsedIdleClip | null> {
