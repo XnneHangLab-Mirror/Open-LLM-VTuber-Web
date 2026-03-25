@@ -40,6 +40,8 @@ const ORIENTATION_CHANNELS: LogicalChannel[] = [
   'head_pitch',
   'head_roll',
   'body_yaw',
+  'body_pitch',
+  'body_roll',
   'gaze_x',
   'gaze_y',
 ];
@@ -55,6 +57,12 @@ function sanitizeChannelValue(channel: LogicalChannel, value: number): number | 
 
   if (channel === 'mouth_open') {
     return clamp(value, 0, 1);
+  }
+
+  if (channel === 'body_yaw' || channel === 'body_pitch' || channel === 'body_roll') {
+    // Recorded idle clips can exceed the nominal [-1, 1] range on body channels.
+    // Keep a wider safety band so large torso motion is preserved.
+    return clamp(value, -2, 2);
   }
 
   return clamp(value, -1, 1);

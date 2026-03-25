@@ -23,7 +23,20 @@ interface Position {
   y: number;
 }
 
+interface MouseFollowPose {
+  head_yaw: number;
+  head_pitch: number;
+  head_roll: number;
+  body_yaw: number;
+  gaze_x: number;
+  gaze_y: number;
+}
+
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+const MOUSE_FOLLOW_START_DELAY_MS = 2000;
+const MOUSE_FOLLOW_SMOOTH_TIME_SECONDS = 0.28;
+const MOUSE_FOLLOW_MAX_SPEED_PER_SECOND = 2.3;
+const LOCAL_POINTER_PRIORITY_WINDOW_MS = 120;
 
 // Thresholds for tap vs drag detection
 const TAP_DURATION_THRESHOLD_MS = 200; // Max duration for a tap
@@ -105,6 +118,26 @@ export const useLive2DModel = ({
   const modelPositionRef = useRef<Position>({ x: 0, y: 0 });
   const prevModelUrlRef = useRef<string | null>(null);
   const isHoveringModelRef = useRef(false);
+  const mouseFollowEnableAtRef = useRef<number>(performance.now() + MOUSE_FOLLOW_START_DELAY_MS);
+  const mouseFollowPoseRef = useRef<MouseFollowPose>({
+    head_yaw: 0,
+    head_pitch: 0,
+    head_roll: 0,
+    body_yaw: 0,
+    gaze_x: 0,
+    gaze_y: 0,
+  });
+  const mouseFollowTargetPoseRef = useRef<MouseFollowPose>({
+    head_yaw: 0,
+    head_pitch: 0,
+    head_roll: 0,
+    body_yaw: 0,
+    gaze_x: 0,
+    gaze_y: 0,
+  });
+  const mouseFollowActiveRef = useRef<boolean>(false);
+  const mouseFollowLastUpdateMsRef = useRef<number | null>(null);
+  const localPointerPriorityUntilMsRef = useRef<number>(0);
   const electronApi = (window as any).electron;
 
   // --- State for Tap vs Drag ---
@@ -113,10 +146,42 @@ export const useLive2DModel = ({
   const isPotentialTapRef = useRef<boolean>(false); // Flag for ongoing potential tap/drag action
   // ---
 
+  const resetMouseFollowSmoothing = useCallback(() => {
+    mouseFollowPoseRef.current = {
+      head_yaw: 0,
+      head_pitch: 0,
+      head_roll: 0,
+      body_yaw: 0,
+      gaze_x: 0,
+      gaze_y: 0,
+    };
+    mouseFollowTargetPoseRef.current = {
+      head_yaw: 0,
+      head_pitch: 0,
+      head_roll: 0,
+      body_yaw: 0,
+      gaze_x: 0,
+      gaze_y: 0,
+    };
+    mouseFollowActiveRef.current = false;
+    mouseFollowLastUpdateMsRef.current = null;
+  }, []);
+
+  const clearMouseAttentionFollow = useCallback(() => {
+    resetMouseFollowSmoothing();
+    getLive2DPoseMixerController().clearMouseAttention();
+  }, [resetMouseFollowSmoothing]);
+
   useEffect(() => {
     const currentUrl = modelInfo?.url;
     const sdkScale = (window as any).LAppDefine?.CurrentKScale;
     const modelScale = modelInfo?.kScale !== undefined ? Number(modelInfo.kScale) : undefined;
+
+    if (!currentUrl) {
+      mouseFollowEnableAtRef.current = Number.POSITIVE_INFINITY;
+      clearMouseAttentionFollow();
+      return;
+    }
 
     const needsUpdate = currentUrl &&
                         (currentUrl !== prevModelUrlRef.current ||
@@ -124,6 +189,8 @@ export const useLive2DModel = ({
 
     if (needsUpdate) {
       prevModelUrlRef.current = currentUrl;
+      mouseFollowEnableAtRef.current = performance.now() + MOUSE_FOLLOW_START_DELAY_MS;
+      clearMouseAttentionFollow();
 
       try {
         const { baseUrl, modelDir, modelFileName } = parseModelUrl(currentUrl);
@@ -148,7 +215,7 @@ export const useLive2DModel = ({
         console.error('Error processing model URL:', error);
       }
     }
-  }, [modelInfo?.url, modelInfo?.kScale, modelInfo?.idleMotionGroupName]);
+  }, [modelInfo?.url, modelInfo?.kScale, modelInfo?.idleMotionGroupName, clearMouseAttentionFollow]);
 
   const getModelPosition = useCallback(() => {
     const adapter = (window as any).getLAppAdapter?.();
@@ -271,15 +338,19 @@ export const useLive2DModel = ({
   }, []);
 
   const updateMouseFollow = useCallback((clientX: number, clientY: number) => {
-    const poseMixerController = getLive2DPoseMixerController();
+    if (performance.now() < mouseFollowEnableAtRef.current) {
+      clearMouseAttentionFollow();
+      return;
+    }
+
     if (isDragging) {
-      poseMixerController.clearMouseAttention();
+      clearMouseAttentionFollow();
       return;
     }
 
     const pointer = getPointerModelCoordinates(clientX, clientY);
     if (!pointer?.model?._modelMatrix) {
-      poseMixerController.clearMouseAttention();
+      clearMouseAttentionFollow();
       return;
     }
 
@@ -287,15 +358,70 @@ export const useLive2DModel = ({
     // use view-space coordinates ([-1, 1] around visible area) rather than model-local matrix inversion.
     const normalizedX = clamp(pointer.viewX, -1, 1);
     const normalizedY = clamp(pointer.viewY, -1, 1);
-    poseMixerController.setMouseAttentionPose({
+    mouseFollowTargetPoseRef.current = {
       head_yaw: normalizedX,
       head_pitch: normalizedY,
       head_roll: normalizedX * normalizedY * -1,
       body_yaw: normalizedX,
       gaze_x: normalizedX,
       gaze_y: normalizedY,
-    });
-  }, [getPointerModelCoordinates, isDragging]);
+    };
+    mouseFollowActiveRef.current = true;
+  }, [getPointerModelCoordinates, isDragging, clearMouseAttentionFollow]);
+
+  useEffect(() => {
+    let rafId = 0;
+    let isDisposed = false;
+    const poseMixerController = getLive2DPoseMixerController();
+
+    const tick = (nowMs: number) => {
+      if (isDisposed) {
+        return;
+      }
+
+      if (
+        mouseFollowActiveRef.current
+        && !isDragging
+        && nowMs >= mouseFollowEnableAtRef.current
+      ) {
+        const lastUpdateMs = mouseFollowLastUpdateMsRef.current ?? (nowMs - 16.7);
+        const dtSeconds = clamp((nowMs - lastUpdateMs) * 0.001, 1 / 240, 0.1);
+        mouseFollowLastUpdateMsRef.current = nowMs;
+
+        const alpha = 1 - Math.exp(-dtSeconds / MOUSE_FOLLOW_SMOOTH_TIME_SECONDS);
+        const maxStep = MOUSE_FOLLOW_MAX_SPEED_PER_SECOND * dtSeconds;
+        const prev = mouseFollowPoseRef.current;
+        const target = mouseFollowTargetPoseRef.current;
+        const smooth = (from: number, to: number): number => {
+          const interpolated = from + (to - from) * alpha;
+          const delta = clamp(interpolated - from, -maxStep, maxStep);
+          return clamp(from + delta, -1, 1);
+        };
+
+        const next: MouseFollowPose = {
+          head_yaw: smooth(prev.head_yaw, target.head_yaw),
+          head_pitch: smooth(prev.head_pitch, target.head_pitch),
+          head_roll: smooth(prev.head_roll, target.head_roll),
+          body_yaw: smooth(prev.body_yaw, target.body_yaw),
+          gaze_x: smooth(prev.gaze_x, target.gaze_x),
+          gaze_y: smooth(prev.gaze_y, target.gaze_y),
+        };
+
+        mouseFollowPoseRef.current = next;
+        poseMixerController.setMouseAttentionPose(next);
+      } else {
+        mouseFollowLastUpdateMsRef.current = null;
+      }
+
+      rafId = window.requestAnimationFrame(tick);
+    };
+
+    rafId = window.requestAnimationFrame(tick);
+    return () => {
+      isDisposed = true;
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [isDragging]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const adapter = (window as any).getLAppAdapter?.();
@@ -407,6 +533,7 @@ export const useLive2DModel = ({
     // --- End Continue Drag Logic ---
 
     // --- Mouse Follow Logic (gaze + head + body follow mouse) ---
+    localPointerPriorityUntilMsRef.current = performance.now() + LOCAL_POINTER_PRIORITY_WINDOW_MS;
     updateMouseFollow(e.clientX, e.clientY);
     // --- End Mouse Follow Logic ---
 
@@ -472,7 +599,7 @@ export const useLive2DModel = ({
   const handleMouseLeave = useCallback(() => {
     const hasGlobalCursorFollow = !isPet && Boolean(electronApi?.ipcRenderer?.invoke);
     if (!hasGlobalCursorFollow) {
-      getLive2DPoseMixerController().clearMouseAttention();
+      clearMouseAttentionFollow();
     }
     if (isDragging) {
       finalizeDragPosition();
@@ -491,7 +618,7 @@ export const useLive2DModel = ({
       isHoveringModelRef.current = false;
       electronApi.ipcRenderer.send('update-component-hover', 'live2d-model', false);
     }
-  }, [isPet, isDragging, electronApi, finalizeDragPosition]);
+  }, [isPet, isDragging, electronApi, finalizeDragPosition, clearMouseAttentionFollow]);
 
   useEffect(() => {
     const handleGlobalPointerRelease = () => {
@@ -519,6 +646,10 @@ export const useLive2DModel = ({
 
     const syncCursorFollow = async () => {
       if (isDisposed || isDragging || isPotentialTapRef.current) {
+        return;
+      }
+
+      if (performance.now() < localPointerPriorityUntilMsRef.current) {
         return;
       }
 

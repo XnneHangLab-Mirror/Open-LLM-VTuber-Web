@@ -46,13 +46,29 @@ interface ParsedIdleClip {
 interface MotionParameterToChannel {
   channel: LogicalChannel;
   normalizeScale: number;
+  priority?: number;
 }
 
 const MOTION_PARAMETER_CHANNEL_MAP: Record<string, MotionParameterToChannel> = {
   ParamAngleX: { channel: 'head_yaw', normalizeScale: 30 },
+  ParamAngleX2: { channel: 'head_yaw', normalizeScale: 30 },
+  ParamAngleX3: { channel: 'head_yaw', normalizeScale: 30 },
   ParamAngleY: { channel: 'head_pitch', normalizeScale: 30 },
+  ParamAngleY2: { channel: 'head_pitch', normalizeScale: 30 },
+  ParamAngleY3: { channel: 'head_pitch', normalizeScale: 30 },
   ParamAngleZ: { channel: 'head_roll', normalizeScale: 30 },
-  ParamBodyAngleX: { channel: 'body_yaw', normalizeScale: 10 },
+  ParamAngleZ2: { channel: 'head_roll', normalizeScale: 30 },
+  ParamBodyAngleX: { channel: 'body_yaw', normalizeScale: 10, priority: 0 },
+  ParamBodyAngleY: { channel: 'body_pitch', normalizeScale: 10, priority: 0 },
+  ParamBodyAngleZ: { channel: 'body_roll', normalizeScale: 10, priority: 0 },
+  bodyX: { channel: 'body_yaw', normalizeScale: 30, priority: 1 },
+  bodyX2: { channel: 'body_yaw', normalizeScale: 30, priority: 2 },
+  bodyX3: { channel: 'body_yaw', normalizeScale: 30, priority: 2 },
+  bodyY: { channel: 'body_pitch', normalizeScale: 30, priority: 1 },
+  bodyZ: { channel: 'body_roll', normalizeScale: 30, priority: 1 },
+  bodyZ2: { channel: 'body_roll', normalizeScale: 30, priority: 2 },
+  bodyZZ: { channel: 'body_roll', normalizeScale: 30, priority: 2 },
+  bodyZZ2: { channel: 'body_roll', normalizeScale: 30, priority: 2 },
   ParamEyeBallX: { channel: 'gaze_x', normalizeScale: 1 },
   ParamEyeBallY: { channel: 'gaze_y', normalizeScale: 1 },
   ParamMouthOpenY: { channel: 'mouth_open', normalizeScale: 1 },
@@ -190,6 +206,25 @@ function sampleCurveValueAtTime(curve: MotionKeyframe[], timeSeconds: number): n
   return prev.value + (next.value - prev.value) * t;
 }
 
+function getCurveRange(curve: MotionKeyframe[]): number {
+  if (curve.length === 0) {
+    return 0;
+  }
+
+  let minValue = curve[0].value;
+  let maxValue = curve[0].value;
+  for (let index = 1; index < curve.length; index += 1) {
+    const value = curve[index].value;
+    if (value < minValue) {
+      minValue = value;
+    }
+    if (value > maxValue) {
+      maxValue = value;
+    }
+  }
+  return maxValue - minValue;
+}
+
 function parseMotion3Clip(sourceUrl: string, data: Motion3File): ParsedIdleClip | null {
   const durationSeconds = Number.isFinite(data.Meta?.Duration) ? Number(data.Meta?.Duration) : 0;
   if (durationSeconds <= 0) {
@@ -197,6 +232,7 @@ function parseMotion3Clip(sourceUrl: string, data: Motion3File): ParsedIdleClip 
   }
 
   const channelCurves: Partial<Record<LogicalChannel, MotionKeyframe[]>> = {};
+  const channelCurveMeta: Partial<Record<LogicalChannel, { priority: number; range: number; keyCount: number }>> = {};
 
   (data.Curves ?? []).forEach((curve) => {
     if (curve.Target !== 'Parameter' || typeof curve.Id !== 'string') {
@@ -218,9 +254,33 @@ function parseMotion3Clip(sourceUrl: string, data: Motion3File): ParsedIdleClip 
       value: point.value / mapping.normalizeScale,
     }));
 
+    const nextPriority = mapping.priority ?? 0;
+    const nextRange = getCurveRange(normalized);
+    const nextKeyCount = normalized.length;
     const existing = channelCurves[mapping.channel];
-    if (!existing || normalized.length > existing.length) {
+    const existingMeta = channelCurveMeta[mapping.channel];
+    if (!existing) {
       channelCurves[mapping.channel] = normalized;
+      channelCurveMeta[mapping.channel] = {
+        priority: nextPriority,
+        range: nextRange,
+        keyCount: nextKeyCount,
+      };
+      return;
+    }
+
+    const shouldReplace = !existingMeta
+      || nextPriority < existingMeta.priority
+      || (nextPriority === existingMeta.priority
+        && (nextRange > existingMeta.range
+          || (Math.abs(nextRange - existingMeta.range) <= 1e-6 && nextKeyCount > existingMeta.keyCount)));
+    if (shouldReplace) {
+      channelCurves[mapping.channel] = normalized;
+      channelCurveMeta[mapping.channel] = {
+        priority: nextPriority,
+        range: nextRange,
+        keyCount: nextKeyCount,
+      };
     }
   });
 
@@ -531,4 +591,3 @@ export class RecordedIdleDriver {
     return loader;
   }
 }
-

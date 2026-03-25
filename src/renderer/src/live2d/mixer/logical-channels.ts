@@ -14,6 +14,8 @@ export const LOGICAL_CHANNELS = [
   'head_pitch',
   'head_roll',
   'body_yaw',
+  'body_pitch',
+  'body_roll',
   'gaze_x',
   'gaze_y',
   'brow_raise',
@@ -27,4 +29,3 @@ export type PoseValues = Partial<Record<LogicalChannel, number>>;
 export interface PoseFrame {
   values: PoseValues;
 }
-

@@ -24,10 +24,32 @@ export type Live2DParameterProfile = Partial<Record<LogicalChannel, Live2DParame
 
 export function getDefaultLive2DParameterProfile(): Live2DParameterProfile {
   return {
-    head_yaw: [{ id: 'ParamAngleX', scale: 30, applyMode: 'set' }],
-    head_pitch: [{ id: 'ParamAngleY', scale: 30, applyMode: 'set' }],
-    head_roll: [{ id: 'ParamAngleZ', scale: 30, applyMode: 'set' }],
-    body_yaw: [{ id: 'ParamBodyAngleX', scale: 10, applyMode: 'set' }],
+    head_yaw: [
+      { id: 'ParamAngleX', scale: 30, applyMode: 'set' },
+      { id: 'ParamAngleX2', scale: 30, applyMode: 'set' },
+      { id: 'ParamAngleX3', scale: 30, applyMode: 'set' },
+    ],
+    head_pitch: [
+      { id: 'ParamAngleY', scale: 30, applyMode: 'set' },
+      { id: 'ParamAngleY2', scale: 30, applyMode: 'set' },
+      { id: 'ParamAngleY3', scale: 30, applyMode: 'set' },
+    ],
+    head_roll: [
+      { id: 'ParamAngleZ', scale: 30, applyMode: 'set' },
+      { id: 'ParamAngleZ2', scale: 30, applyMode: 'set' },
+    ],
+    body_yaw: [
+      { id: 'ParamBodyAngleX', scale: 10, applyMode: 'set' },
+      { id: 'bodyX', scale: 30, applyMode: 'set' },
+    ],
+    body_pitch: [
+      { id: 'ParamBodyAngleY', scale: 10, applyMode: 'set' },
+      { id: 'bodyY', scale: 30, applyMode: 'set' },
+    ],
+    body_roll: [
+      { id: 'ParamBodyAngleZ', scale: 10, applyMode: 'set' },
+      { id: 'bodyZ', scale: 30, applyMode: 'set' },
+    ],
     gaze_x: [{ id: 'ParamEyeBallX', scale: 1, applyMode: 'set' }],
     gaze_y: [{ id: 'ParamEyeBallY', scale: 1, applyMode: 'set' }],
 
