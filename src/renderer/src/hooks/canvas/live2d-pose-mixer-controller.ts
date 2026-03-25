@@ -79,6 +79,10 @@ export class Live2DPoseMixerController {
 
   private modelUrl?: string;
 
+  private idleState: string = 'listening';
+
+  private idleMouthEnabled = true;
+
   private layers: Record<PoseLayerId, LayerState> = {
     idle_layer: { weight: DEFAULT_LAYER_WEIGHTS.idle_layer, values: {} },
     speech_layer: { weight: DEFAULT_LAYER_WEIGHTS.speech_layer, values: {} },
@@ -232,6 +236,19 @@ export class Live2DPoseMixerController {
     this.recordedIdleDriver.setModelUrl(modelUrl);
   }
 
+  public setIdleRuntimeState(state?: string | null): void {
+    const normalizedState = typeof state === 'string' ? state.trim().toLowerCase() : '';
+    if (normalizedState) {
+      this.idleState = normalizedState;
+    }
+
+    const shouldEnableIdleMouth = this.idleState !== 'speaking';
+    if (this.idleMouthEnabled !== shouldEnableIdleMouth) {
+      this.idleMouthEnabled = shouldEnableIdleMouth;
+      this.refreshFinalPoseSnapshot();
+    }
+  }
+
   public setRecordedIdleBank(bank: IdleBankConfig | null): void {
     this.recordedIdleDriver.setIdleBank(bank);
   }
@@ -276,6 +293,8 @@ export class Live2DPoseMixerController {
   public getDebugState() {
     return {
       modelUrl: this.modelUrl ?? null,
+      idleState: this.idleState,
+      idleMouthEnabled: this.idleMouthEnabled,
       layers: this.getLayerStates(),
       finalPose: this.getFinalMixedPose(),
       profile: this.getProfile(),
@@ -355,6 +374,7 @@ export class Live2DPoseMixerController {
       getRecordedIdleState: () => this.getRecordedIdleState(),
       setRecordedIdleBank: (bank: IdleBankConfig | null) => this.setRecordedIdleBank(bank),
       clearRecordedIdleBank: () => this.clearRecordedIdleBank(),
+      setIdleRuntimeState: (state?: string | null) => this.setIdleRuntimeState(state),
       inspect: () => {
         const debugState = this.getDebugState();
         console.log('[Live2DPoseMixer] debug state', debugState);
@@ -374,6 +394,10 @@ export class Live2DPoseMixerController {
         id: 'idle_layer',
         weight: this.layers.idle_layer.weight,
         frame: isEmptyPose(this.layers.idle_layer.values) ? null : { values: this.layers.idle_layer.values },
+        // 运行时策略：
+        // - listening: 允许 recorded idle 的 mouth_open 参与
+        // - speaking: 屏蔽 idle 的 mouth_open，嘴部交给语音链路（lip sync / speech）
+        mask: this.idleMouthEnabled ? undefined : { mouth_open: 0 },
       },
       {
         id: 'speech_layer',

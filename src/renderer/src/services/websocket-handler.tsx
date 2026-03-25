@@ -136,6 +136,19 @@ function resolveIdleBankFromMessage(message: MessageEvent): IdleBankConfig | nul
   });
 }
 
+function resolveIdleStateFromMessage(message: MessageEvent): string | null {
+  const actionState = message.actions?.idle_state;
+  if (typeof actionState === 'string' && actionState.trim()) {
+    return actionState.trim();
+  }
+
+  if (typeof message.idle_state === 'string' && message.idle_state.trim()) {
+    return message.idle_state.trim();
+  }
+
+  return null;
+}
+
 function WebSocketHandler({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
   const [wsState, setWsState] = useState<string>('CLOSED');
@@ -240,6 +253,7 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
     if (message.actions && ('idle_bank' in message.actions || 'idle_list' in message.actions)) {
       const controller = getLive2DPoseMixerController();
       const idleBank = resolveIdleBankFromActions(message.actions);
+      controller.setIdleRuntimeState(resolveIdleStateFromMessage(message));
       if (idleBank) {
         controller.setRecordedIdleBank(idleBank);
       } else {
@@ -249,6 +263,7 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
 
     if (message.actions && ('mixer_weights' in message.actions || message.actions.mixer_weights_mode === 'reset')) {
       const controller = getLive2DPoseMixerController();
+      controller.setIdleRuntimeState(resolveIdleStateFromMessage(message));
       applyMixerWeights(controller, {
         mixer_weights: message.actions.mixer_weights,
         mixer_weights_mode: message.actions.mixer_weights_mode,
@@ -257,6 +272,7 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
 
     if (message.type === 'set-live2d-mixer-weights' || 'mixer_weights' in message || message.mixer_weights_mode === 'reset') {
       const controller = getLive2DPoseMixerController();
+      controller.setIdleRuntimeState(resolveIdleStateFromMessage(message));
       applyMixerWeights(controller, {
         mixer_weights: message.mixer_weights,
         mixer_weights_mode: message.mixer_weights_mode,
@@ -265,6 +281,7 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
 
     if (message.type === 'set-live2d-idle-bank') {
       const controller = getLive2DPoseMixerController();
+      controller.setIdleRuntimeState(resolveIdleStateFromMessage(message));
       const idleBank = resolveIdleBankFromMessage(message);
       if (idleBank) {
         controller.setRecordedIdleBank(idleBank);

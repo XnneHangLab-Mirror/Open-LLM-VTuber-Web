@@ -72,6 +72,7 @@ export interface Actions {
   idle_list?: string[] | null;
   idle_mode?: IdlePlaybackMode;
   idle_bank?: IdleBankConfig | null;
+  idle_state?: string;
 }
 
 export interface MessageEvent {
