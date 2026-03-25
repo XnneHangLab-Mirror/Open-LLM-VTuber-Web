@@ -24,6 +24,8 @@ import { useBrowser } from '@/context/browser-context';
 import { useMood } from '@/context/mood-context';
 import { getLive2DPoseMixerController } from '@/hooks/canvas/live2d-pose-mixer-controller';
 import { LOGICAL_CHANNELS, PoseValues } from '@/live2d/mixer/logical-channels';
+import { IdleBankConfig, normalizeIdleBankConfig } from '@/live2d/mixer/recorded-idle-driver';
+import type { PoseLayerId } from '@/hooks/canvas/live2d-pose-mixer-controller';
 
 function normalizeBackendPose(input: unknown): PoseValues {
   if (!input || typeof input !== 'object') {
@@ -41,6 +43,97 @@ function normalizeBackendPose(input: unknown): PoseValues {
   });
 
   return values;
+}
+
+const MIXER_LAYER_IDS: PoseLayerId[] = [
+  'idle_layer',
+  'speech_layer',
+  'backend_pose_layer',
+  'mouse_attention_layer',
+];
+
+function normalizeMixerWeights(input: unknown): Partial<Record<PoseLayerId, number>> {
+  if (!input || typeof input !== 'object') {
+    return {};
+  }
+
+  const source = input as Record<string, unknown>;
+  const weights: Partial<Record<PoseLayerId, number>> = {};
+  MIXER_LAYER_IDS.forEach((layerId) => {
+    const raw = source[layerId];
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {
+      weights[layerId] = raw;
+    }
+  });
+  return weights;
+}
+
+function applyMixerWeights(
+  controller: ReturnType<typeof getLive2DPoseMixerController>,
+  payload: { mixer_weights?: unknown; mixer_weights_mode?: 'patch' | 'reset' | null | undefined },
+): void {
+  if (payload.mixer_weights_mode === 'reset') {
+    controller.resetLayerWeights();
+  }
+
+  const nextWeights = normalizeMixerWeights(payload.mixer_weights);
+  if (Object.keys(nextWeights).length > 0) {
+    controller.patchLayerWeights(nextWeights);
+  }
+}
+
+function resolveIdleBankFromActions(actions: MessageEvent['actions']): IdleBankConfig | null {
+  if (!actions) {
+    return null;
+  }
+
+  if ('idle_bank' in actions) {
+    return normalizeIdleBankConfig(actions.idle_bank ?? null);
+  }
+
+  if (!('idle_list' in actions)) {
+    return null;
+  }
+
+  const clips = Array.isArray(actions.idle_list)
+    ? actions.idle_list
+      .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+      .map((url) => ({ url: url.trim() }))
+    : [];
+
+  if (clips.length === 0) {
+    return null;
+  }
+
+  return normalizeIdleBankConfig({
+    clips,
+    mode: actions.idle_mode ?? 'random_no_repeat',
+  });
+}
+
+function resolveIdleBankFromMessage(message: MessageEvent): IdleBankConfig | null {
+  if ('idle_bank' in message) {
+    return normalizeIdleBankConfig(message.idle_bank ?? null);
+  }
+
+  if (!('idle_list' in message)) {
+    return null;
+  }
+
+  const clips = Array.isArray(message.idle_list)
+    ? message.idle_list
+      .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+      .map((url) => ({ url: url.trim() }))
+    : [];
+
+  if (clips.length === 0) {
+    return null;
+  }
+
+  return normalizeIdleBankConfig({
+    clips,
+    mode: message.idle_mode ?? 'random_no_repeat',
+  });
 }
 
 function WebSocketHandler({ children }: { children: React.ReactNode }) {
@@ -144,6 +237,42 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
       }
     }
 
+    if (message.actions && ('idle_bank' in message.actions || 'idle_list' in message.actions)) {
+      const controller = getLive2DPoseMixerController();
+      const idleBank = resolveIdleBankFromActions(message.actions);
+      if (idleBank) {
+        controller.setRecordedIdleBank(idleBank);
+      } else {
+        controller.clearRecordedIdleBank();
+      }
+    }
+
+    if (message.actions && ('mixer_weights' in message.actions || message.actions.mixer_weights_mode === 'reset')) {
+      const controller = getLive2DPoseMixerController();
+      applyMixerWeights(controller, {
+        mixer_weights: message.actions.mixer_weights,
+        mixer_weights_mode: message.actions.mixer_weights_mode,
+      });
+    }
+
+    if (message.type === 'set-live2d-mixer-weights' || 'mixer_weights' in message || message.mixer_weights_mode === 'reset') {
+      const controller = getLive2DPoseMixerController();
+      applyMixerWeights(controller, {
+        mixer_weights: message.mixer_weights,
+        mixer_weights_mode: message.mixer_weights_mode,
+      });
+    }
+
+    if (message.type === 'set-live2d-idle-bank') {
+      const controller = getLive2DPoseMixerController();
+      const idleBank = resolveIdleBankFromMessage(message);
+      if (idleBank) {
+        controller.setRecordedIdleBank(idleBank);
+      } else {
+        controller.clearRecordedIdleBank();
+      }
+    }
+
     switch (message.type) {
       case 'control':
         handleControlMessage(message);
@@ -151,6 +280,12 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
       case 'pose':
       case 'live2d-pose':
         // `actions.pose` is handled above (P1 mixer bridge).
+        break;
+      case 'set-live2d-idle-bank':
+        // handled above as a dedicated live2d control message.
+        break;
+      case 'set-live2d-mixer-weights':
+        // handled above as a dedicated live2d control message.
         break;
       case 'set-model-and-conf':
         setAiState('loading');

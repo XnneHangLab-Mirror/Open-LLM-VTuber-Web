@@ -11,6 +11,7 @@ import { LAppDelegate } from '../../../WebSDK/src/lappdelegate';
 import { LAppLive2DManager } from '../../../WebSDK/src/lapplive2dmanager';
 import { initializeLive2D } from '@cubismsdksamples/main';
 import { useMode } from '@/context/mode-context';
+import { getLive2DPoseMixerController } from '@/hooks/canvas/live2d-pose-mixer-controller';
 
 interface UseLive2DModelProps {
   modelInfo: ModelInfo | undefined;
@@ -230,6 +231,12 @@ export const useLive2DModel = ({
     const scaledY = y * scaleY;
     const modelX = view._deviceToScreen.transformX(scaledX);
     const modelY = view._deviceToScreen.transformY(scaledY);
+    const viewX = typeof view.transformViewX === 'function'
+      ? view.transformViewX(scaledX)
+      : modelX;
+    const viewY = typeof view.transformViewY === 'function'
+      ? view.transformViewY(scaledY)
+      : modelY;
 
     return {
       adapter,
@@ -243,26 +250,51 @@ export const useLive2DModel = ({
       scaledY,
       modelX,
       modelY,
+      viewX,
+      viewY,
     };
   }, [canvasRef]);
 
+  const finalizeDragPosition = useCallback(() => {
+    const adapter = (window as any).getLAppAdapter?.();
+    if (adapter) {
+      const currentModel = adapter.getModel();
+      if (currentModel && currentModel._modelMatrix) {
+        const matrix = currentModel._modelMatrix.getArray();
+        const finalPos = { x: matrix[12], y: matrix[13] };
+        modelPositionRef.current = finalPos;
+        modelStartPos.current = finalPos;
+        setPosition(finalPos);
+      }
+    }
+    setIsDragging(false);
+  }, []);
+
   const updateMouseFollow = useCallback((clientX: number, clientY: number) => {
-    if (isDragging || isPotentialTapRef.current) {
+    const poseMixerController = getLive2DPoseMixerController();
+    if (isDragging) {
+      poseMixerController.clearMouseAttention();
       return;
     }
 
     const pointer = getPointerModelCoordinates(clientX, clientY);
     if (!pointer?.model?._modelMatrix) {
+      poseMixerController.clearMouseAttention();
       return;
     }
 
-    const localX = pointer.model._modelMatrix.invertTransformX(pointer.modelX);
-    const localY = pointer.model._modelMatrix.invertTransformY(pointer.modelY);
-
-    LAppLive2DManager.getInstance().onDrag(
-      clamp(localX, -1, 1),
-      clamp(localY, -1, 1),
-    );
+    // Keep mouse-attention input close to the legacy Cubism drag path:
+    // use view-space coordinates ([-1, 1] around visible area) rather than model-local matrix inversion.
+    const normalizedX = clamp(pointer.viewX, -1, 1);
+    const normalizedY = clamp(pointer.viewY, -1, 1);
+    poseMixerController.setMouseAttentionPose({
+      head_yaw: normalizedX,
+      head_pitch: normalizedY,
+      head_roll: normalizedX * normalizedY * -1,
+      body_yaw: normalizedX,
+      gaze_x: normalizedX,
+      gaze_y: normalizedY,
+    });
   }, [getPointerModelCoordinates, isDragging]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -403,17 +435,7 @@ export const useLive2DModel = ({
 
     if (isDragging) {
       // Finalize drag
-      setIsDragging(false);
-      if (adapter) {
-        const currentModel = adapter.getModel(); // Re-get model in case adapter changed
-        if (currentModel && currentModel._modelMatrix) {
-          const matrix = currentModel._modelMatrix.getArray();
-          const finalPos = { x: matrix[12], y: matrix[13] };
-          modelPositionRef.current = finalPos;
-          modelStartPos.current = finalPos; // Update base position for next potential drag
-          setPosition(finalPos);
-        }
-      }
+      finalizeDragPosition();
     } else if (isPotentialTapRef.current && adapter && model && view && canvasRef.current) {
       // --- Tap Motion Logic ---
       const timeElapsed = Date.now() - mouseDownTimeRef.current;
@@ -445,12 +467,15 @@ export const useLive2DModel = ({
 
     // Reset potential tap flag regardless of outcome
     isPotentialTapRef.current = false;
-  }, [isDragging, canvasRef, modelInfo]);
+  }, [isDragging, canvasRef, modelInfo, finalizeDragPosition]);
 
   const handleMouseLeave = useCallback(() => {
+    const hasGlobalCursorFollow = !isPet && Boolean(electronApi?.ipcRenderer?.invoke);
+    if (!hasGlobalCursorFollow) {
+      getLive2DPoseMixerController().clearMouseAttention();
+    }
     if (isDragging) {
-      // If dragging and mouse leaves, treat it like a mouse up to end drag
-      handleMouseUp({} as React.MouseEvent); // Pass a dummy event or adjust handleMouseUp signature
+      finalizeDragPosition();
     }
 
     if (isPet || !electronApi?.ipcRenderer?.invoke) {
@@ -466,7 +491,24 @@ export const useLive2DModel = ({
       isHoveringModelRef.current = false;
       electronApi.ipcRenderer.send('update-component-hover', 'live2d-model', false);
     }
-  }, [isPet, isDragging, electronApi, handleMouseUp]);
+  }, [isPet, isDragging, electronApi, finalizeDragPosition]);
+
+  useEffect(() => {
+    const handleGlobalPointerRelease = () => {
+      if (isDragging) {
+        finalizeDragPosition();
+      }
+      isPotentialTapRef.current = false;
+    };
+
+    window.addEventListener('mouseup', handleGlobalPointerRelease);
+    window.addEventListener('blur', handleGlobalPointerRelease);
+
+    return () => {
+      window.removeEventListener('mouseup', handleGlobalPointerRelease);
+      window.removeEventListener('blur', handleGlobalPointerRelease);
+    };
+  }, [isDragging, finalizeDragPosition]);
 
   useEffect(() => {
     if (isPet || !electronApi?.ipcRenderer?.invoke) {

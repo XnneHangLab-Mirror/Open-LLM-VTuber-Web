@@ -8,6 +8,8 @@ import { ConfigFile } from '@/context/character-config-context';
 import { toaster } from '@/components/ui/toaster';
 import { ImagePayload } from '@/types/media';
 import { PoseValues } from '@/live2d/mixer/logical-channels';
+import { IdleBankConfig, IdlePlaybackMode } from '@/live2d/mixer/recorded-idle-driver';
+import type { PoseLayerId } from '@/hooks/canvas/live2d-pose-mixer-controller';
 
 export interface DisplayText {
   text: string;
@@ -59,6 +61,17 @@ export interface Actions {
   pose_patch?: PoseValues | null;
   pose_mode?: 'set' | 'patch' | 'clear';
   pose_weight?: number;
+  mixer_weights?: Partial<Record<PoseLayerId, number>>;
+  mixer_weights_mode?: 'patch' | 'reset';
+
+  /**
+   * Minimal recorded-idle inputs (P2):
+   * - `idle_list` is the compact shape for quick integration.
+   * - `idle_bank` is a structured form for future metadata (weight/scene/mood).
+   */
+  idle_list?: string[] | null;
+  idle_mode?: IdlePlaybackMode;
+  idle_bank?: IdleBankConfig | null;
 }
 
 export interface MessageEvent {
@@ -94,6 +107,12 @@ export interface MessageEvent {
   turn_id?: string;
   live2d_model?: string;
   expression?: string | number;
+  idle_state?: string;
+  idle_list?: string[] | null;
+  idle_mode?: IdlePlaybackMode;
+  idle_bank?: IdleBankConfig | null;
+  mixer_weights?: Partial<Record<PoseLayerId, number>>;
+  mixer_weights_mode?: 'patch' | 'reset';
   browser_view?: {
     debuggerFullscreenUrl: string;
     debuggerUrl: string;

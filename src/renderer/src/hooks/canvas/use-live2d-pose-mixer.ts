@@ -9,6 +9,7 @@ import { getLive2DPoseMixerController } from '@/hooks/canvas/live2d-pose-mixer-c
 export const useLive2DPoseMixer = (modelUrl?: string) => {
   useEffect(() => {
     const controller = getLive2DPoseMixerController();
+    controller.setModelUrl(modelUrl);
     controller.installDebugGlobals();
 
     let frameId = 0;
@@ -35,4 +36,3 @@ export const useLive2DPoseMixer = (modelUrl?: string) => {
     };
   }, [modelUrl]);
 };
-

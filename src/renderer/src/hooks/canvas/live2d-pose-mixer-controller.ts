@@ -4,6 +4,7 @@ import {
   Live2DParameterProfile,
 } from '@/live2d/mixer/live2d-parameter-profile';
 import { LogicalChannel, PoseValues } from '@/live2d/mixer/logical-channels';
+import { IdleBankConfig, RecordedIdleDriver } from '@/live2d/mixer/recorded-idle-driver';
 import { Mixer, PoseLayer } from '@/live2d/mixer/pose-mixer';
 
 interface PatchedModel {
@@ -11,6 +12,7 @@ interface PatchedModel {
     controller: Live2DPoseMixerController;
     originalUpdate: () => void;
   };
+  setDragging?: (x: number, y: number) => void;
   _model?: {
     addParameterValueById: (id: unknown, value: number, weight?: number) => void;
     setParameterValueById: (id: unknown, value: number, weight?: number) => void;
@@ -19,12 +21,19 @@ interface PatchedModel {
   update: () => void;
 }
 
-export type PoseLayerId = 'idle_layer' | 'speech_layer' | 'backend_pose_layer';
+export type PoseLayerId = 'idle_layer' | 'speech_layer' | 'backend_pose_layer' | 'mouse_attention_layer';
 
 interface LayerState {
   weight: number;
   values: PoseValues;
 }
+
+const DEFAULT_LAYER_WEIGHTS: Record<PoseLayerId, number> = {
+  idle_layer: 1,
+  speech_layer: 1,
+  backend_pose_layer: 1,
+  mouse_attention_layer: 0.35,
+};
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -51,13 +60,37 @@ export class Live2DPoseMixerController {
 
   private profile: Live2DParameterProfile = getDefaultLive2DParameterProfile();
 
+  private modelUrl?: string;
+
   private layers: Record<PoseLayerId, LayerState> = {
-    idle_layer: { weight: 1, values: {} },
-    speech_layer: { weight: 1, values: {} },
-    backend_pose_layer: { weight: 1, values: {} },
+    idle_layer: { weight: DEFAULT_LAYER_WEIGHTS.idle_layer, values: {} },
+    speech_layer: { weight: DEFAULT_LAYER_WEIGHTS.speech_layer, values: {} },
+    backend_pose_layer: { weight: DEFAULT_LAYER_WEIGHTS.backend_pose_layer, values: {} },
+    mouse_attention_layer: { weight: DEFAULT_LAYER_WEIGHTS.mouse_attention_layer, values: {} },
   };
 
+  private readonly recordedIdleDriver = new RecordedIdleDriver((pose) => {
+    this.setIdlePose(pose);
+  });
+
   private lastFinalPose: PoseValues = {};
+
+  private getMouseAttentionDragInput(): { x: number; y: number } {
+    const layer = this.layers.mouse_attention_layer;
+    if (!layer || layer.weight <= 0) {
+      return { x: 0, y: 0 };
+    }
+
+    const values = layer.values ?? {};
+    const rawX = [values.gaze_x, values.head_yaw, values.body_yaw]
+      .find((value) => typeof value === 'number' && Number.isFinite(value));
+    const rawY = [values.gaze_y, values.head_pitch]
+      .find((value) => typeof value === 'number' && Number.isFinite(value));
+
+    const x = typeof rawX === 'number' ? clamp(rawX, -1, 1) : 0;
+    const y = typeof rawY === 'number' ? clamp(rawY, -1, 1) : 0;
+    return { x, y };
+  }
 
   /**
    * Replace the entire pose for a layer (partial poses are allowed).
@@ -103,6 +136,54 @@ export class Live2DPoseMixerController {
     this.clearLayerPose('backend_pose_layer');
   }
 
+  public setMouseAttentionPose(values: PoseValues, weight?: number): void {
+    this.setLayerPose('mouse_attention_layer', values, weight);
+  }
+
+  public clearMouseAttention(): void {
+    this.clearLayerPose('mouse_attention_layer');
+  }
+
+  public setLayerWeight(layerId: PoseLayerId, weight: number): void {
+    if (!Number.isFinite(weight) || weight < 0) {
+      return;
+    }
+    this.layers[layerId] = {
+      ...this.layers[layerId],
+      weight,
+    };
+    this.refreshFinalPoseSnapshot();
+  }
+
+  public patchLayerWeights(weights: Partial<Record<PoseLayerId, number>>): void {
+    let changed = false;
+    (Object.keys(weights) as PoseLayerId[]).forEach((layerId) => {
+      const weight = weights[layerId];
+      if (typeof weight !== 'number' || !Number.isFinite(weight) || weight < 0) {
+        return;
+      }
+      this.layers[layerId] = {
+        ...this.layers[layerId],
+        weight,
+      };
+      changed = true;
+    });
+
+    if (changed) {
+      this.refreshFinalPoseSnapshot();
+    }
+  }
+
+  public resetLayerWeights(): void {
+    (Object.keys(DEFAULT_LAYER_WEIGHTS) as PoseLayerId[]).forEach((layerId) => {
+      this.layers[layerId] = {
+        ...this.layers[layerId],
+        weight: DEFAULT_LAYER_WEIGHTS[layerId],
+      };
+    });
+    this.refreshFinalPoseSnapshot();
+  }
+
   public setSpeechMouthOpen(mouthOpen: number, weight?: number): void {
     this.patchLayerPose('speech_layer', { mouth_open: mouthOpen }, weight);
   }
@@ -124,6 +205,23 @@ export class Live2DPoseMixerController {
     this.refreshFinalPoseSnapshot();
   }
 
+  public setModelUrl(modelUrl?: string): void {
+    this.modelUrl = modelUrl;
+    this.recordedIdleDriver.setModelUrl(modelUrl);
+  }
+
+  public setRecordedIdleBank(bank: IdleBankConfig | null): void {
+    this.recordedIdleDriver.setIdleBank(bank);
+  }
+
+  public clearRecordedIdleBank(): void {
+    this.recordedIdleDriver.clearIdleBank();
+  }
+
+  public getRecordedIdleState() {
+    return this.recordedIdleDriver.getDebugState();
+  }
+
   public getProfile(): Live2DParameterProfile {
     return this.profile;
   }
@@ -142,6 +240,10 @@ export class Live2DPoseMixerController {
         weight: this.layers.backend_pose_layer.weight,
         values: { ...this.layers.backend_pose_layer.values },
       },
+      mouse_attention_layer: {
+        weight: this.layers.mouse_attention_layer.weight,
+        values: { ...this.layers.mouse_attention_layer.values },
+      },
     };
   }
 
@@ -151,9 +253,11 @@ export class Live2DPoseMixerController {
 
   public getDebugState() {
     return {
+      modelUrl: this.modelUrl ?? null,
       layers: this.getLayerStates(),
       finalPose: this.getFinalMixedPose(),
       profile: this.getProfile(),
+      recordedIdle: this.getRecordedIdleState(),
     };
   }
 
@@ -181,9 +285,16 @@ export class Live2DPoseMixerController {
       originalUpdate,
     };
 
+    // Disable SDK built-in drag parameter injection; mouse attention is now a mixer layer.
+    const manager = (window as any).LAppLive2DManager?.getInstance?.();
+    manager?.setDragInputEnabled?.(false);
+
     model.update = () => {
       const runner = model._poseMixerController;
+      const dragInput = this.getMouseAttentionDragInput();
+      model.setDragging?.(dragInput.x, dragInput.y);
       runner?.originalUpdate();
+      this.recordedIdleDriver.update(performance.now() * 0.001);
 
       const appliedAnyPose = this.applyMixedPose(model, lappAdapter);
       if (appliedAnyPose) {
@@ -201,6 +312,11 @@ export class Live2DPoseMixerController {
       setBackendPose: (pose: PoseValues, weight?: number) => this.setBackendPose(pose, weight),
       patchBackendPose: (pose: PoseValues, weight?: number) => this.patchBackendPose(pose, weight),
       clearBackendPose: () => this.clearBackendPose(),
+      setMouseAttentionPose: (pose: PoseValues, weight?: number) => this.setMouseAttentionPose(pose, weight),
+      clearMouseAttention: () => this.clearMouseAttention(),
+      setLayerWeight: (layerId: PoseLayerId, weight: number) => this.setLayerWeight(layerId, weight),
+      patchLayerWeights: (weights: Partial<Record<PoseLayerId, number>>) => this.patchLayerWeights(weights),
+      resetLayerWeights: () => this.resetLayerWeights(),
       setSpeechMouthOpen: (value: number, weight?: number) => this.setSpeechMouthOpen(value, weight),
       clearSpeech: () => this.clearSpeech(),
       setIdlePose: (pose: PoseValues, weight?: number) => this.setIdlePose(pose, weight),
@@ -209,10 +325,14 @@ export class Live2DPoseMixerController {
         this.clearIdlePose();
         this.clearSpeech();
         this.clearBackendPose();
+        this.clearMouseAttention();
       },
       getLayers: () => this.getLayerStates(),
       getFinalPose: () => this.getFinalMixedPose(),
       getDebugState: () => this.getDebugState(),
+      getRecordedIdleState: () => this.getRecordedIdleState(),
+      setRecordedIdleBank: (bank: IdleBankConfig | null) => this.setRecordedIdleBank(bank),
+      clearRecordedIdleBank: () => this.clearRecordedIdleBank(),
       inspect: () => {
         const debugState = this.getDebugState();
         console.log('[Live2DPoseMixer] debug state', debugState);
@@ -242,6 +362,11 @@ export class Live2DPoseMixerController {
         id: 'backend_pose_layer',
         weight: this.layers.backend_pose_layer.weight,
         frame: isEmptyPose(this.layers.backend_pose_layer.values) ? null : { values: this.layers.backend_pose_layer.values },
+      },
+      {
+        id: 'mouse_attention_layer',
+        weight: this.layers.mouse_attention_layer.weight,
+        frame: isEmptyPose(this.layers.mouse_attention_layer.values) ? null : { values: this.layers.mouse_attention_layer.values },
       },
     ];
 
