@@ -71,11 +71,64 @@ const MOTION_PARAMETER_CHANNEL_MAP: Record<string, MotionParameterToChannel> = {
   bodyZZ2: { channel: 'body_roll', normalizeScale: 30, priority: 2 },
   ParamEyeBallX: { channel: 'gaze_x', normalizeScale: 1 },
   ParamEyeBallY: { channel: 'gaze_y', normalizeScale: 1 },
+  // 若录制 idle 提供眼皮曲线，则优先由录制数据驱动，
+  // 避免 SDK 自动眨眼在 idle 播放期间“抢控制权”。
+  ParamEyeLOpen: { channel: 'eye_l_open', normalizeScale: 1 },
+  ParamEyeROpen: { channel: 'eye_r_open', normalizeScale: 1 },
   ParamMouthOpenY: { channel: 'mouth_open', normalizeScale: 1 },
 };
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+// 当前故意关闭 loop seam 混合：
+// 边界统一走一条输出过渡链路，避免“双重混合”带来的跳变。
+const LOOP_SEAM_BLEND_SECONDS = 0.0;
+
+// 核心衔接时长，覆盖两种场景：
+// - 同 clip 循环边界（尾帧 -> 新一轮开头）
+// - random 切 clip（上一段 -> 下一段）
+// 该过渡发生在输出层，不计入 clip 播放时长。
+const CLIP_TRANSITION_BLEND_SECONDS = 1.0;
+
+// 输出姿态的最终低通平滑，用于吸收采样抖动。
+const OUTPUT_POSE_SMOOTH_SECONDS = 0.22;
+
+function blendChannelValue(fromValue: number | undefined, toValue: number | undefined, alpha: number): number | null {
+  const hasFrom = typeof fromValue === 'number' && Number.isFinite(fromValue);
+  const hasTo = typeof toValue === 'number' && Number.isFinite(toValue);
+  if (!hasFrom && !hasTo) {
+    return null;
+  }
+
+  if (!hasFrom) {
+    return toValue as number;
+  }
+  if (!hasTo) {
+    return fromValue;
+  }
+
+  return fromValue + ((toValue as number) - fromValue) * alpha;
+}
+
+function blendPose(fromPose: PoseValues, toPose: PoseValues, alpha: number): PoseValues {
+  const boundedAlpha = clamp(alpha, 0, 1);
+  const pose: PoseValues = {};
+  const channels = new Set<LogicalChannel>([
+    ...(Object.keys(fromPose) as LogicalChannel[]),
+    ...(Object.keys(toPose) as LogicalChannel[]),
+  ]);
+
+  channels.forEach((channel) => {
+    const blended = blendChannelValue(fromPose[channel], toPose[channel], boundedAlpha);
+    if (blended === null) {
+      return;
+    }
+    pose[channel] = blended;
+  });
+
+  return pose;
 }
 
 function normalizeMotionSegmentType(value: number): MotionSegmentType | null {
@@ -373,9 +426,17 @@ export class RecordedIdleDriver {
 
   private activeClipStartTimeSeconds = 0;
 
+  private transitionFromPose: PoseValues | null = null;
+
+  private transitionStartTimeSeconds: number | null = null;
+
   private requestToken = 0;
 
   private latestPose: PoseValues = {};
+
+  private smoothedPose: PoseValues = {};
+
+  private lastOutputTimeSeconds: number | null = null;
 
   constructor(private readonly onPose: (pose: PoseValues) => void) {}
 
@@ -421,21 +482,42 @@ export class RecordedIdleDriver {
     }
 
     const duration = Math.max(0.001, this.activeClip.durationSeconds);
-    const elapsed = nowSeconds - this.activeClipStartTimeSeconds;
+    let elapsed = nowSeconds - this.activeClipStartTimeSeconds;
     if (elapsed >= duration) {
       if (this.bank.clips.length === 1 && this.activeClip.loop) {
-        this.activeClipStartTimeSeconds = nowSeconds;
+        // 保持播放时间连续（elapsed 回卷），并在输出层做短过渡，
+        // 这样边界平滑不会“吃掉”动画时间。
+        // 关键点：以最近一次已输出的姿态作为过渡起点，
+        // 保证从用户当前看到的画面自然接续。
+        const tailPose = Object.keys(this.latestPose).length > 0
+          ? { ...this.latestPose }
+          : this.samplePose(this.activeClip, duration);
+        elapsed %= duration;
+        this.activeClipStartTimeSeconds = nowSeconds - elapsed;
+        this.transitionFromPose = tailPose;
+        this.transitionStartTimeSeconds = nowSeconds;
       } else {
         void this.selectNextClip(nowSeconds);
         return;
       }
     }
 
-    const boundedElapsed = this.activeClip
-      ? Math.min(Math.max(0, nowSeconds - this.activeClipStartTimeSeconds), this.activeClip.durationSeconds)
-      : 0;
-    const pose = this.activeClip ? this.samplePose(this.activeClip, boundedElapsed) : {};
-    this.pushPose(pose);
+    const boundedElapsed = Math.min(Math.max(0, elapsed), duration);
+    let pose = this.samplePoseWithLoopSeamBlend(this.activeClip, boundedElapsed);
+
+    if (this.transitionFromPose && this.transitionStartTimeSeconds !== null) {
+      const transitionElapsed = nowSeconds - this.transitionStartTimeSeconds;
+      const transitionAlpha = clamp(transitionElapsed / CLIP_TRANSITION_BLEND_SECONDS, 0, 1);
+      pose = blendPose(this.transitionFromPose, pose, transitionAlpha);
+
+      if (transitionAlpha >= 1) {
+        this.transitionFromPose = null;
+        this.transitionStartTimeSeconds = null;
+      }
+    }
+
+    const smoothedPose = this.smoothOutputPose(pose, nowSeconds);
+    this.pushPose(smoothedPose);
   }
 
   public getDebugState() {
@@ -460,12 +542,66 @@ export class RecordedIdleDriver {
     this.isLoading = false;
     this.activeClip = null;
     this.activeClipIndex = -1;
+    this.previousClipIndex = -1;
     this.activeClipStartTimeSeconds = 0;
+    this.transitionFromPose = null;
+    this.transitionStartTimeSeconds = null;
+    this.smoothedPose = {};
+    this.lastOutputTimeSeconds = null;
   }
 
   private pushPose(pose: PoseValues): void {
     this.latestPose = { ...pose };
     this.onPose(this.latestPose);
+  }
+
+  private smoothOutputPose(targetPose: PoseValues, nowSeconds: number): PoseValues {
+    if (!Number.isFinite(nowSeconds)) {
+      return targetPose;
+    }
+
+    if (OUTPUT_POSE_SMOOTH_SECONDS <= 0) {
+      this.smoothedPose = { ...targetPose };
+      this.lastOutputTimeSeconds = nowSeconds;
+      return targetPose;
+    }
+
+    const targetChannels = Object.keys(targetPose) as LogicalChannel[];
+    if (targetChannels.length === 0) {
+      this.smoothedPose = {};
+      this.lastOutputTimeSeconds = nowSeconds;
+      return {};
+    }
+
+    const previousTimeSeconds = this.lastOutputTimeSeconds;
+    if (previousTimeSeconds === null) {
+      this.smoothedPose = { ...targetPose };
+      this.lastOutputTimeSeconds = nowSeconds;
+      return { ...targetPose };
+    }
+
+    // 指数平滑 + dt 补偿，降低不同帧率下的可见卡顿感。
+    const dtSeconds = clamp(nowSeconds - previousTimeSeconds, 1 / 240, 0.2);
+    const alpha = 1 - Math.exp(-dtSeconds / OUTPUT_POSE_SMOOTH_SECONDS);
+    const nextPose: PoseValues = {};
+
+    targetChannels.forEach((channel) => {
+      const targetValue = targetPose[channel];
+      if (typeof targetValue !== 'number' || !Number.isFinite(targetValue)) {
+        return;
+      }
+
+      const previousValue = this.smoothedPose[channel];
+      const fromValue = typeof previousValue === 'number' && Number.isFinite(previousValue)
+        ? previousValue
+        : targetValue;
+
+      nextPose[channel] = fromValue + (targetValue - fromValue) * alpha;
+    });
+
+    this.smoothedPose = nextPose;
+    this.lastOutputTimeSeconds = nowSeconds;
+    return nextPose;
   }
 
   private samplePose(clip: ParsedIdleClip, elapsedSeconds: number): PoseValues {
@@ -481,6 +617,24 @@ export class RecordedIdleDriver {
     });
 
     return pose;
+  }
+
+  private samplePoseWithLoopSeamBlend(clip: ParsedIdleClip, elapsedSeconds: number): PoseValues {
+    const duration = Math.max(0.001, clip.durationSeconds);
+    if (!clip.loop) {
+      return this.samplePose(clip, elapsedSeconds);
+    }
+
+    const wrappedElapsed = elapsedSeconds % duration;
+    const poseAtTime = this.samplePose(clip, wrappedElapsed);
+    const seamWindow = Math.min(LOOP_SEAM_BLEND_SECONDS, duration * 0.25);
+    if (seamWindow <= 0 || wrappedElapsed < duration - seamWindow) {
+      return poseAtTime;
+    }
+
+    const nearLoopAlpha = (wrappedElapsed - (duration - seamWindow)) / seamWindow;
+    const loopStartPose = this.samplePose(clip, 0);
+    return blendPose(poseAtTime, loopStartPose, nearLoopAlpha);
   }
 
   private pickWeightedRandomIndex(candidateIndexes: number[]): number {
@@ -558,11 +712,16 @@ export class RecordedIdleDriver {
       return;
     }
 
+    const previousPose = this.latestPose;
+
     this.previousClipIndex = nextIndex;
     this.activeClipIndex = nextIndex;
     this.activeClip = parsedClip;
     this.activeClipStartTimeSeconds = nowSeconds;
-    this.pushPose(this.samplePose(parsedClip, 0));
+    this.transitionFromPose = Object.keys(previousPose).length > 0 ? { ...previousPose } : null;
+    this.transitionStartTimeSeconds = this.transitionFromPose ? nowSeconds : null;
+    const initialPose = this.samplePoseWithLoopSeamBlend(parsedClip, 0);
+    this.pushPose(this.transitionFromPose ? blendPose(this.transitionFromPose, initialPose, 0) : initialPose);
   }
 
   private async loadClip(resolvedUrl: string): Promise<ParsedIdleClip | null> {

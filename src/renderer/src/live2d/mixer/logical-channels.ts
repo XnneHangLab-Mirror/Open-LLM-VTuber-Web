@@ -18,6 +18,8 @@ export const LOGICAL_CHANNELS = [
   'body_roll',
   'gaze_x',
   'gaze_y',
+  'eye_l_open',
+  'eye_r_open',
   'brow_raise',
   'mouth_open',
 ] as const;

@@ -52,6 +52,8 @@ export function getDefaultLive2DParameterProfile(): Live2DParameterProfile {
     ],
     gaze_x: [{ id: 'ParamEyeBallX', scale: 1, applyMode: 'set' }],
     gaze_y: [{ id: 'ParamEyeBallY', scale: 1, applyMode: 'set' }],
+    eye_l_open: [{ id: 'ParamEyeLOpen', scale: 1, applyMode: 'set' }],
+    eye_r_open: [{ id: 'ParamEyeROpen', scale: 1, applyMode: 'set' }],
 
     // brow_raise: model dependent (reserved for future profiles)
 

@@ -55,7 +55,7 @@ function sanitizeChannelValue(channel: LogicalChannel, value: number): number | 
     return null;
   }
 
-  if (channel === 'mouth_open') {
+  if (channel === 'mouth_open' || channel === 'eye_l_open' || channel === 'eye_r_open') {
     return clamp(value, 0, 1);
   }
 
