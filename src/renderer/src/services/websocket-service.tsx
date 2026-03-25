@@ -7,6 +7,7 @@ import { HistoryInfo } from '@/context/websocket-context';
 import { ConfigFile } from '@/context/character-config-context';
 import { toaster } from '@/components/ui/toaster';
 import { ImagePayload } from '@/types/media';
+import { PoseValues } from '@/live2d/mixer/logical-channels';
 
 export interface DisplayText {
   text: string;
@@ -49,6 +50,14 @@ export interface Actions {
   expressions?: string[] | number [];
   pictures?: string[];
   sounds?: string[];
+
+  /**
+   * Minimal logical pose input for the Live2D pose mixer (backend_pose_layer).
+   * Values are logical channels (normalized), not raw Live2D parameter IDs.
+   */
+  pose?: PoseValues | null;
+  pose_mode?: 'set' | 'patch' | 'clear';
+  pose_weight?: number;
 }
 
 export interface MessageEvent {

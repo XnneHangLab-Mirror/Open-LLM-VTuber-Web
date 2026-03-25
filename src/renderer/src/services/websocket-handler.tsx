@@ -22,6 +22,26 @@ import { useGroup } from '@/context/group-context';
 import { useInterrupt } from '@/hooks/utils/use-interrupt';
 import { useBrowser } from '@/context/browser-context';
 import { useMood } from '@/context/mood-context';
+import { getLive2DPoseMixerController } from '@/hooks/canvas/live2d-pose-mixer-controller';
+import { LOGICAL_CHANNELS, PoseValues } from '@/live2d/mixer/logical-channels';
+
+function normalizeBackendPose(input: unknown): PoseValues {
+  if (!input || typeof input !== 'object') {
+    return {};
+  }
+
+  const source = input as Record<string, unknown>;
+  const values: PoseValues = {};
+
+  LOGICAL_CHANNELS.forEach((channel) => {
+    const value = source[channel];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      values[channel] = value;
+    }
+  });
+
+  return values;
+}
 
 function WebSocketHandler({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
@@ -100,9 +120,32 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
 
   const handleWebSocketMessage = useCallback((message: MessageEvent) => {
     console.log('Received message from server:', message);
+
+    // Minimal backend -> mixer bridge (P1): if the backend sends logical pose in actions.pose,
+    // route it into the mixer backend_pose_layer. This intentionally does NOT touch expressions/motions.
+    if (message.actions && 'pose' in message.actions) {
+      const controller = getLive2DPoseMixerController();
+      const mode = message.actions.pose_mode ?? 'set';
+      const weight = typeof message.actions.pose_weight === 'number' && Number.isFinite(message.actions.pose_weight)
+        ? message.actions.pose_weight
+        : undefined;
+
+      if (mode === 'clear' || message.actions.pose === null) {
+        controller.clearBackendPose();
+      } else if (mode === 'patch') {
+        controller.patchBackendPose(normalizeBackendPose(message.actions.pose), weight);
+      } else {
+        controller.setBackendPose(normalizeBackendPose(message.actions.pose), weight);
+      }
+    }
+
     switch (message.type) {
       case 'control':
         handleControlMessage(message);
+        break;
+      case 'pose':
+      case 'live2d-pose':
+        // `actions.pose` is handled above (P1 mixer bridge).
         break;
       case 'set-model-and-conf':
         setAiState('loading');
