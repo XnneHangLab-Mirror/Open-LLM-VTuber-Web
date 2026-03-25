@@ -29,6 +29,7 @@ export const Live2D = memo(
     const { resetExpression } = useLive2DExpression();
     const isPet = mode === 'pet';
 
+    // Keep this order stable: appearance/expression wrapper first, mixer wrapper second.
     useLive2DAppearance(modelInfo, persistentAppearance);
     useLive2DPoseMixer(modelInfo?.url);
 

@@ -121,20 +121,25 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
   const handleWebSocketMessage = useCallback((message: MessageEvent) => {
     console.log('Received message from server:', message);
 
-    // Minimal backend -> mixer bridge (P1): if the backend sends logical pose in actions.pose,
-    // route it into the mixer backend_pose_layer. This intentionally does NOT touch expressions/motions.
-    if (message.actions && 'pose' in message.actions) {
+    // Minimal backend -> mixer bridge (P1.5): if the backend sends logical pose in actions,
+    // route it into backend_pose_layer only. This intentionally does NOT touch expressions/motions.
+    if (message.actions && ('pose' in message.actions || 'pose_patch' in message.actions)) {
       const controller = getLive2DPoseMixerController();
+      const hasPosePatch = 'pose_patch' in message.actions;
       const mode = message.actions.pose_mode ?? 'set';
       const weight = typeof message.actions.pose_weight === 'number' && Number.isFinite(message.actions.pose_weight)
         ? message.actions.pose_weight
         : undefined;
 
-      if (mode === 'clear' || message.actions.pose === null) {
+      if (mode === 'clear' || message.actions.pose === null || message.actions.pose_patch === null) {
         controller.clearBackendPose();
-      } else if (mode === 'patch') {
-        controller.patchBackendPose(normalizeBackendPose(message.actions.pose), weight);
+      } else if (mode === 'patch' || hasPosePatch) {
+        // `patch` preserves previous backend channels and updates only provided keys.
+        // `pose_patch` defaults to patch semantics for streaming/incremental backends.
+        const patchPose = hasPosePatch ? message.actions.pose_patch : message.actions.pose;
+        controller.patchBackendPose(normalizeBackendPose(patchPose), weight);
       } else {
+        // Default `set` is safer for full-pose payloads to avoid stale channel carry-over.
         controller.setBackendPose(normalizeBackendPose(message.actions.pose), weight);
       }
     }

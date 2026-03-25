@@ -1,4 +1,8 @@
-import { getDefaultLive2DParameterProfile, Live2DParameterProfile } from '@/live2d/mixer/live2d-parameter-profile';
+import {
+  getDefaultLive2DParameterProfile,
+  Live2DParameterApplyMode,
+  Live2DParameterProfile,
+} from '@/live2d/mixer/live2d-parameter-profile';
 import { LogicalChannel, PoseValues } from '@/live2d/mixer/logical-channels';
 import { Mixer, PoseLayer } from '@/live2d/mixer/pose-mixer';
 
@@ -8,6 +12,7 @@ interface PatchedModel {
     originalUpdate: () => void;
   };
   _model?: {
+    addParameterValueById: (id: unknown, value: number, weight?: number) => void;
     setParameterValueById: (id: unknown, value: number, weight?: number) => void;
     update: () => void;
   };
@@ -52,6 +57,8 @@ export class Live2DPoseMixerController {
     backend_pose_layer: { weight: 1, values: {} },
   };
 
+  private lastFinalPose: PoseValues = {};
+
   /**
    * Replace the entire pose for a layer (partial poses are allowed).
    */
@@ -60,6 +67,7 @@ export class Live2DPoseMixerController {
       weight: typeof weight === 'number' && Number.isFinite(weight) ? weight : this.layers[layerId].weight,
       values: { ...values },
     };
+    this.refreshFinalPoseSnapshot();
   }
 
   /**
@@ -72,6 +80,7 @@ export class Live2DPoseMixerController {
       weight: nextWeight,
       values: { ...this.layers[layerId].values, ...values },
     };
+    this.refreshFinalPoseSnapshot();
   }
 
   public clearLayerPose(layerId: PoseLayerId): void {
@@ -79,6 +88,7 @@ export class Live2DPoseMixerController {
       ...this.layers[layerId],
       values: {},
     };
+    this.refreshFinalPoseSnapshot();
   }
 
   public setBackendPose(values: PoseValues, weight?: number): void {
@@ -111,10 +121,40 @@ export class Live2DPoseMixerController {
 
   public setProfile(profile: Live2DParameterProfile): void {
     this.profile = profile;
+    this.refreshFinalPoseSnapshot();
   }
 
   public getProfile(): Live2DParameterProfile {
     return this.profile;
+  }
+
+  public getLayerStates(): Record<PoseLayerId, LayerState> {
+    return {
+      idle_layer: {
+        weight: this.layers.idle_layer.weight,
+        values: { ...this.layers.idle_layer.values },
+      },
+      speech_layer: {
+        weight: this.layers.speech_layer.weight,
+        values: { ...this.layers.speech_layer.values },
+      },
+      backend_pose_layer: {
+        weight: this.layers.backend_pose_layer.weight,
+        values: { ...this.layers.backend_pose_layer.values },
+      },
+    };
+  }
+
+  public getFinalMixedPose(): PoseValues {
+    return { ...this.lastFinalPose };
+  }
+
+  public getDebugState() {
+    return {
+      layers: this.getLayerStates(),
+      finalPose: this.getFinalMixedPose(),
+      profile: this.getProfile(),
+    };
   }
 
   /**
@@ -156,11 +196,8 @@ export class Live2DPoseMixerController {
 
   public installDebugGlobals(): void {
     const w = window as any;
-    if (w.Live2DPoseMixer) {
-      return;
-    }
 
-    w.Live2DPoseMixer = {
+    const debugApi = {
       setBackendPose: (pose: PoseValues, weight?: number) => this.setBackendPose(pose, weight),
       patchBackendPose: (pose: PoseValues, weight?: number) => this.patchBackendPose(pose, weight),
       clearBackendPose: () => this.clearBackendPose(),
@@ -168,9 +205,25 @@ export class Live2DPoseMixerController {
       clearSpeech: () => this.clearSpeech(),
       setIdlePose: (pose: PoseValues, weight?: number) => this.setIdlePose(pose, weight),
       clearIdlePose: () => this.clearIdlePose(),
+      clearAllLayers: () => {
+        this.clearIdlePose();
+        this.clearSpeech();
+        this.clearBackendPose();
+      },
+      getLayers: () => this.getLayerStates(),
+      getFinalPose: () => this.getFinalMixedPose(),
+      getDebugState: () => this.getDebugState(),
+      inspect: () => {
+        const debugState = this.getDebugState();
+        console.log('[Live2DPoseMixer] debug state', debugState);
+        return debugState;
+      },
       getProfile: () => this.getProfile(),
       setProfile: (profile: Live2DParameterProfile) => this.setProfile(profile),
     };
+
+    w.Live2DPoseMixer = debugApi;
+    w.Live2DPoseMixerDebug = debugApi;
   }
 
   private getActiveLayers(): PoseLayer[] {
@@ -195,13 +248,34 @@ export class Live2DPoseMixerController {
     return layers;
   }
 
+  private refreshFinalPoseSnapshot(): void {
+    this.lastFinalPose = this.mixer.apply(this.getActiveLayers());
+  }
+
+  private applyParameterByMode(
+    model: PatchedModel,
+    parameterId: unknown,
+    value: number,
+    applyMode: Live2DParameterApplyMode,
+  ): void {
+    if (applyMode === 'add' && model._model?.addParameterValueById) {
+      model._model.addParameterValueById(parameterId, value, 1);
+      return;
+    }
+
+    model._model?.setParameterValueById(parameterId, value, 1);
+  }
+
   private applyMixedPose(model: PatchedModel, lappAdapter: any): boolean {
     const idManager = lappAdapter.getIdManager?.();
     if (!idManager?.getId) {
       return false;
     }
 
-    const finalPose = this.mixer.apply(this.getActiveLayers());
+    // Mixer owns long-lived head/eye/body orientation channels.
+    // Future drag/mouse-attention/event layers should enter here as additional layers.
+    this.refreshFinalPoseSnapshot();
+    const finalPose = this.lastFinalPose;
     const poseChannels = Object.keys(finalPose) as LogicalChannel[];
     if (poseChannels.length === 0) {
       return false;
@@ -231,7 +305,8 @@ export class Live2DPoseMixerController {
         }
 
         const parameterId = idManager.getId(target.id);
-        model._model?.setParameterValueById(parameterId, sanitizedValue * target.scale, 1);
+        const applyMode = target.applyMode ?? 'set';
+        this.applyParameterByMode(model, parameterId, sanitizedValue * target.scale, applyMode);
         appliedAny = true;
       });
     });
@@ -245,4 +320,3 @@ const live2DPoseMixerController = new Live2DPoseMixerController();
 export function getLive2DPoseMixerController(): Live2DPoseMixerController {
   return live2DPoseMixerController;
 }
-

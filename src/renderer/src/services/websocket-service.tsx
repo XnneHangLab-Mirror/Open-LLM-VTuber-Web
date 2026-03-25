@@ -56,6 +56,7 @@ export interface Actions {
    * Values are logical channels (normalized), not raw Live2D parameter IDs.
    */
   pose?: PoseValues | null;
+  pose_patch?: PoseValues | null;
   pose_mode?: 'set' | 'patch' | 'clear';
   pose_weight?: number;
 }

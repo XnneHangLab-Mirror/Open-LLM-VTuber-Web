@@ -57,6 +57,21 @@ interface PatchedModel {
 const expressionCatalogCache = new Map<string, Promise<ResolvedExpressionReference[]>>();
 const appearancePatchCache = new Map<string, Promise<AppearancePatch | null>>();
 
+// Keep persistent orientation/attention controls under mixer governance.
+// Appearance/expression patches can still shape face style, but should not own these channels.
+const MIXER_OWNED_PARAMETER_IDS = new Set([
+  'ParamAngleX',
+  'ParamAngleY',
+  'ParamAngleZ',
+  'ParamBodyAngleX',
+  'ParamEyeBallX',
+  'ParamEyeBallY',
+]);
+
+function isMixerOwnedParameter(parameterId: string): boolean {
+  return MIXER_OWNED_PARAMETER_IDS.has(parameterId);
+}
+
 function normalizeBlend(blend: string | undefined): ExpressionBlend {
   if (blend === 'Add' || blend === 'Multiply' || blend === 'Overwrite') {
     return blend;
@@ -132,6 +147,7 @@ export async function resolveAppearancePatch(
       operations: (expressionFile.Parameters ?? [])
         .filter((parameter): parameter is ExpressionParameter & { Id: string; Value: number } =>
           typeof parameter.Id === 'string' && typeof parameter.Value === 'number')
+        .filter((parameter) => !isMixerOwnedParameter(parameter.Id))
         .map((parameter) => ({
           id: parameter.Id,
           value: parameter.Value,

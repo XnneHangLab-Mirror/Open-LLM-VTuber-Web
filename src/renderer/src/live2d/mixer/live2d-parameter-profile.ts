@@ -1,8 +1,16 @@
 import { LogicalChannel } from '@/live2d/mixer/logical-channels';
 
+export type Live2DParameterApplyMode = 'set' | 'add';
+
 export interface Live2DParameterTarget {
   id: string;
   scale: number;
+
+  /**
+   * Reserved for future layered ownership (mouse attention/event/etc.).
+   * P1/P1.5 default remains `set` to preserve existing behavior.
+   */
+  applyMode?: Live2DParameterApplyMode;
 }
 
 /**
@@ -16,16 +24,15 @@ export type Live2DParameterProfile = Partial<Record<LogicalChannel, Live2DParame
 
 export function getDefaultLive2DParameterProfile(): Live2DParameterProfile {
   return {
-    head_yaw: [{ id: 'ParamAngleX', scale: 30 }],
-    head_pitch: [{ id: 'ParamAngleY', scale: 30 }],
-    head_roll: [{ id: 'ParamAngleZ', scale: 30 }],
-    body_yaw: [{ id: 'ParamBodyAngleX', scale: 10 }],
-    gaze_x: [{ id: 'ParamEyeBallX', scale: 1 }],
-    gaze_y: [{ id: 'ParamEyeBallY', scale: 1 }],
+    head_yaw: [{ id: 'ParamAngleX', scale: 30, applyMode: 'set' }],
+    head_pitch: [{ id: 'ParamAngleY', scale: 30, applyMode: 'set' }],
+    head_roll: [{ id: 'ParamAngleZ', scale: 30, applyMode: 'set' }],
+    body_yaw: [{ id: 'ParamBodyAngleX', scale: 10, applyMode: 'set' }],
+    gaze_x: [{ id: 'ParamEyeBallX', scale: 1, applyMode: 'set' }],
+    gaze_y: [{ id: 'ParamEyeBallY', scale: 1, applyMode: 'set' }],
 
     // brow_raise: model dependent (reserved for future profiles)
 
-    mouth_open: [{ id: 'ParamMouthOpenY', scale: 1 }],
+    mouth_open: [{ id: 'ParamMouthOpenY', scale: 1, applyMode: 'set' }],
   };
 }
-
