@@ -22,6 +22,144 @@ import { useGroup } from '@/context/group-context';
 import { useInterrupt } from '@/hooks/utils/use-interrupt';
 import { useBrowser } from '@/context/browser-context';
 import { useMood } from '@/context/mood-context';
+import { getLive2DPoseMixerController } from '@/hooks/canvas/live2d-pose-mixer-controller';
+import { LOGICAL_CHANNELS, PoseValues } from '@/live2d/mixer/logical-channels';
+import { IdleBankConfig, IdlePlayCommand, normalizeIdleBankConfig } from '@/live2d/mixer/recorded-idle-driver';
+import type { PoseLayerId } from '@/hooks/canvas/live2d-pose-mixer-controller';
+
+function normalizeBackendPose(input: unknown): PoseValues {
+  if (!input || typeof input !== 'object') {
+    return {};
+  }
+
+  const source = input as Record<string, unknown>;
+  const values: PoseValues = {};
+
+  LOGICAL_CHANNELS.forEach((channel) => {
+    const value = source[channel];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      values[channel] = value;
+    }
+  });
+
+  return values;
+}
+
+const MIXER_LAYER_IDS: PoseLayerId[] = [
+  'idle_layer',
+  'speech_layer',
+  'backend_pose_layer',
+  'mouse_attention_layer',
+];
+
+function normalizeMixerWeights(input: unknown): Partial<Record<PoseLayerId, number>> {
+  if (!input || typeof input !== 'object') {
+    return {};
+  }
+
+  const source = input as Record<string, unknown>;
+  const weights: Partial<Record<PoseLayerId, number>> = {};
+  MIXER_LAYER_IDS.forEach((layerId) => {
+    const raw = source[layerId];
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {
+      weights[layerId] = raw;
+    }
+  });
+  return weights;
+}
+
+function applyMixerWeights(
+  controller: ReturnType<typeof getLive2DPoseMixerController>,
+  payload: { mixer_weights?: unknown; mixer_weights_mode?: 'patch' | 'reset' | null | undefined },
+): void {
+  if (payload.mixer_weights_mode === 'reset') {
+    controller.resetLayerWeights();
+  }
+
+  const nextWeights = normalizeMixerWeights(payload.mixer_weights);
+  if (Object.keys(nextWeights).length > 0) {
+    controller.patchLayerWeights(nextWeights);
+  }
+}
+
+function resolveIdleBankFromActions(actions: MessageEvent['actions']): IdleBankConfig | null {
+  if (!actions) {
+    return null;
+  }
+
+  if ('idle_bank' in actions) {
+    return normalizeIdleBankConfig(actions.idle_bank ?? null);
+  }
+
+  if (!('idle_list' in actions)) {
+    return null;
+  }
+
+  const clips = Array.isArray(actions.idle_list)
+    ? actions.idle_list
+      .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+      .map((url) => ({ url: url.trim() }))
+    : [];
+
+  if (clips.length === 0) {
+    return null;
+  }
+
+  return normalizeIdleBankConfig({
+    clips,
+    mode: actions.idle_mode ?? 'random_no_repeat',
+  });
+}
+
+function resolveIdleBankFromMessage(message: MessageEvent): IdleBankConfig | null {
+  if ('idle_bank' in message) {
+    return normalizeIdleBankConfig(message.idle_bank ?? null);
+  }
+
+  if (!('idle_list' in message)) {
+    return null;
+  }
+
+  const clips = Array.isArray(message.idle_list)
+    ? message.idle_list
+      .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+      .map((url) => ({ url: url.trim() }))
+    : [];
+
+  if (clips.length === 0) {
+    return null;
+  }
+
+  return normalizeIdleBankConfig({
+    clips,
+    mode: message.idle_mode ?? 'random_no_repeat',
+  });
+}
+
+function resolveIdleStateFromMessage(message: MessageEvent): string | null {
+  const actionState = message.actions?.idle_state;
+  if (typeof actionState === 'string' && actionState.trim()) {
+    return actionState.trim();
+  }
+
+  if (typeof message.idle_state === 'string' && message.idle_state.trim()) {
+    return message.idle_state.trim();
+  }
+
+  return null;
+}
+
+function resolveIdlePlayFromMessage(message: MessageEvent): IdlePlayCommand | string | null {
+  if (message.actions && 'idle_play' in message.actions) {
+    return message.actions.idle_play ?? null;
+  }
+
+  if ('idle_play' in message) {
+    return message.idle_play ?? null;
+  }
+
+  return null;
+}
 
 function WebSocketHandler({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
@@ -100,9 +238,96 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
 
   const handleWebSocketMessage = useCallback((message: MessageEvent) => {
     console.log('Received message from server:', message);
+
+    // Minimal backend -> mixer bridge (P1.5): if the backend sends logical pose in actions,
+    // route it into backend_pose_layer only. This intentionally does NOT touch expressions/motions.
+    if (message.actions && ('pose' in message.actions || 'pose_patch' in message.actions)) {
+      const controller = getLive2DPoseMixerController();
+      const hasPosePatch = 'pose_patch' in message.actions;
+      const mode = message.actions.pose_mode ?? 'set';
+      const weight = typeof message.actions.pose_weight === 'number' && Number.isFinite(message.actions.pose_weight)
+        ? message.actions.pose_weight
+        : undefined;
+
+      if (mode === 'clear' || message.actions.pose === null || message.actions.pose_patch === null) {
+        controller.clearBackendPose();
+      } else if (mode === 'patch' || hasPosePatch) {
+        // `patch` preserves previous backend channels and updates only provided keys.
+        // `pose_patch` defaults to patch semantics for streaming/incremental backends.
+        const patchPose = hasPosePatch ? message.actions.pose_patch : message.actions.pose;
+        controller.patchBackendPose(normalizeBackendPose(patchPose), weight);
+      } else {
+        // Default `set` is safer for full-pose payloads to avoid stale channel carry-over.
+        controller.setBackendPose(normalizeBackendPose(message.actions.pose), weight);
+      }
+    }
+
+    if (message.actions && ('idle_bank' in message.actions || 'idle_list' in message.actions)) {
+      const controller = getLive2DPoseMixerController();
+      const idleBank = resolveIdleBankFromActions(message.actions);
+      controller.setIdleRuntimeState(resolveIdleStateFromMessage(message));
+      if (idleBank) {
+        controller.setRecordedIdleBank(idleBank);
+      } else {
+        controller.clearRecordedIdleBank();
+      }
+    }
+
+    if (message.actions && ('mixer_weights' in message.actions || message.actions.mixer_weights_mode === 'reset')) {
+      const controller = getLive2DPoseMixerController();
+      controller.setIdleRuntimeState(resolveIdleStateFromMessage(message));
+      applyMixerWeights(controller, {
+        mixer_weights: message.actions.mixer_weights,
+        mixer_weights_mode: message.actions.mixer_weights_mode,
+      });
+    }
+
+    if (message.type === 'set-live2d-mixer-weights' || 'mixer_weights' in message || message.mixer_weights_mode === 'reset') {
+      const controller = getLive2DPoseMixerController();
+      controller.setIdleRuntimeState(resolveIdleStateFromMessage(message));
+      applyMixerWeights(controller, {
+        mixer_weights: message.mixer_weights,
+        mixer_weights_mode: message.mixer_weights_mode,
+      });
+    }
+
+    if (message.type === 'set-live2d-idle-bank') {
+      const controller = getLive2DPoseMixerController();
+      controller.setIdleRuntimeState(resolveIdleStateFromMessage(message));
+      const idleBank = resolveIdleBankFromMessage(message);
+      if (idleBank) {
+        controller.setRecordedIdleBank(idleBank);
+      } else {
+        controller.clearRecordedIdleBank();
+      }
+    }
+
+    if (
+      (message.actions && 'idle_play' in message.actions)
+      || message.type === 'set-live2d-idle-play'
+      || 'idle_play' in message
+    ) {
+      const controller = getLive2DPoseMixerController();
+      controller.setIdleRuntimeState(resolveIdleStateFromMessage(message));
+      controller.playRecordedIdleClip(resolveIdlePlayFromMessage(message));
+    }
+
     switch (message.type) {
       case 'control':
         handleControlMessage(message);
+        break;
+      case 'pose':
+      case 'live2d-pose':
+        // `actions.pose` is handled above (P1 mixer bridge).
+        break;
+      case 'set-live2d-idle-bank':
+        // handled above as a dedicated live2d control message.
+        break;
+      case 'set-live2d-mixer-weights':
+        // handled above as a dedicated live2d control message.
+        break;
+      case 'set-live2d-idle-play':
+        // handled above as a dedicated recorded-idle trigger.
         break;
       case 'set-model-and-conf':
         setAiState('loading');
@@ -331,6 +556,7 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
     sendMessage: wsService.sendMessage.bind(wsService),
     wsState,
     reconnect: () => wsService.connect(wsUrl),
+    disconnect: () => wsService.disconnect(),
     wsUrl,
     setWsUrl,
     baseUrl,

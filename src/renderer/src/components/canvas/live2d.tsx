@@ -11,6 +11,7 @@ import { useLive2DResize } from "@/hooks/canvas/use-live2d-resize";
 import { useAiState, AiStateEnum } from "@/context/ai-state-context";
 import { useLive2DExpression } from "@/hooks/canvas/use-live2d-expression";
 import { useLive2DAppearance } from "@/hooks/canvas/use-live2d-appearance";
+import { useLive2DPoseMixer } from "@/hooks/canvas/use-live2d-pose-mixer";
 import { useForceIgnoreMouse } from "@/hooks/utils/use-force-ignore-mouse";
 import { useMode } from "@/context/mode-context";
 
@@ -28,7 +29,9 @@ export const Live2D = memo(
     const { resetExpression } = useLive2DExpression();
     const isPet = mode === 'pet';
 
+    // Keep this order stable: appearance/expression wrapper first, mixer wrapper second.
     useLive2DAppearance(modelInfo, persistentAppearance);
+    useLive2DPoseMixer(modelInfo?.url);
 
     // Get canvasRef from useLive2DResize
     const { canvasRef } = useLive2DResize({
