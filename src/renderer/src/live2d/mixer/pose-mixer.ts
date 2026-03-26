@@ -18,22 +18,48 @@ export interface PoseLayer {
 }
 
 export interface MixerApplyOptions {
-  mouthOpen?: {
-    preferLayerId?: string;
-  };
+  preferredChannels?: Partial<Record<LogicalChannel, string[]>>;
 }
 
 export class Mixer {
-  private readonly mouthOpenPreferLayerId: string;
+  private readonly preferredChannels: Partial<Record<LogicalChannel, string[]>>;
 
   constructor(options: MixerApplyOptions = {}) {
-    this.mouthOpenPreferLayerId = options.mouthOpen?.preferLayerId ?? 'speech_layer';
+    this.preferredChannels = options.preferredChannels ?? {};
+  }
+
+  private getEffectiveChannelValue(
+    activeLayers: PoseLayer[],
+    layerId: string,
+    channel: LogicalChannel,
+  ): number | null {
+    const layer = activeLayers.find((candidate) => candidate.id === layerId);
+    if (!layer) {
+      return null;
+    }
+
+    const value = layer.frame?.values?.[channel];
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return null;
+    }
+
+    const channelMask = layer.mask?.[channel];
+    const channelWeightMultiplier = typeof channelMask === 'number' && Number.isFinite(channelMask)
+      ? channelMask
+      : 1;
+    const effectiveWeight = layer.weight * channelWeightMultiplier;
+    if (effectiveWeight <= 0) {
+      return null;
+    }
+
+    return value;
   }
 
   /**
    * Blend multiple layers into a final (partial) pose.
    * - Missing channels are allowed
-   * - First version: weighted average blend
+   * - Default path: weighted average blend
+   * - Preferred channels can short-circuit to specific layers after weighting
    */
   public apply(layers: PoseLayer[]): PoseValues {
     const activeLayers = layers.filter((layer) => {
@@ -75,14 +101,21 @@ export class Mixer {
       if (weightSum > 0) {
         finalPose[channel] = weightedSum / weightSum;
       }
-    });
 
-    // Special-case: mouth should prefer speech layer when present.
-    const preferredLayer = activeLayers.find((layer) => layer.id === this.mouthOpenPreferLayerId);
-    const preferredMouthOpen = preferredLayer?.frame?.values?.mouth_open;
-    if (typeof preferredMouthOpen === 'number' && Number.isFinite(preferredMouthOpen)) {
-      finalPose.mouth_open = preferredMouthOpen;
-    }
+      const preferredLayerIds = this.preferredChannels[channel];
+      if (!preferredLayerIds || preferredLayerIds.length === 0) {
+        return;
+      }
+
+      for (let index = 0; index < preferredLayerIds.length; index += 1) {
+        const preferredValue = this.getEffectiveChannelValue(activeLayers, preferredLayerIds[index], channel);
+        if (preferredValue === null) {
+          continue;
+        }
+        finalPose[channel] = preferredValue;
+        break;
+      }
+    });
 
     return finalPose;
   }

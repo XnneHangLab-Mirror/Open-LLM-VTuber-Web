@@ -4,6 +4,7 @@
  * Convention (first version):
  * - Most channels are normalized to [-1, 1]
  * - `mouth_open` is normalized to [0, 1]
+ * - `mouth_form` is normalized to [-1, 1]
  *
  * NOTE: In the long run, head/eye/body orientation should be driven by the mixer
  * rather than static expressions. Expressions should stay focused on facial shapes.
@@ -22,6 +23,7 @@ export const LOGICAL_CHANNELS = [
   'eye_r_open',
   'brow_raise',
   'mouth_open',
+  'mouth_form',
 ] as const;
 
 export type LogicalChannel = (typeof LOGICAL_CHANNELS)[number];

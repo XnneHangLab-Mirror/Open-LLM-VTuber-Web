@@ -58,5 +58,6 @@ export function getDefaultLive2DParameterProfile(): Live2DParameterProfile {
     // brow_raise: model dependent (reserved for future profiles)
 
     mouth_open: [{ id: 'ParamMouthOpenY', scale: 1, applyMode: 'set' }],
+    mouth_form: [{ id: 'ParamMouthForm', scale: 1, applyMode: 'set' }],
   };
 }
