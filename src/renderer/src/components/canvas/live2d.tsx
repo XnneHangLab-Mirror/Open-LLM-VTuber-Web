@@ -5,7 +5,6 @@ import { memo, useRef, useEffect } from "react";
 import { useLive2DConfig } from "@/context/live2d-config-context";
 import { useIpcHandlers } from "@/hooks/utils/use-ipc-handlers";
 import { useInterrupt } from "@/hooks/utils/use-interrupt";
-import { useAudioTask } from "@/hooks/utils/use-audio-task";
 import { useLive2DModel } from "@/hooks/canvas/use-live2d-model";
 import { useLive2DResize } from "@/hooks/canvas/use-live2d-resize";
 import { useAiState, AiStateEnum } from "@/context/ai-state-context";
@@ -49,8 +48,6 @@ export const Live2D = memo(
     // Setup hooks
     useIpcHandlers();
     useInterrupt();
-    useAudioTask({ managePlaybackCompletion: true });
-
     // Idle only clears the transient expression layer.
     useEffect(() => {
       if (aiState === AiStateEnum.IDLE) {
@@ -130,4 +127,4 @@ export const Live2D = memo(
 
 Live2D.displayName = "Live2D";
 
-export { useInterrupt, useAudioTask };
+export { useInterrupt };
