@@ -26,6 +26,21 @@ export type PoseLayerId = 'idle_layer' | 'speech_layer' | 'backend_pose_layer' |
 interface LayerState {
   weight: number;
   values: PoseValues;
+  weightTransition: WeightTransition | null;
+}
+
+interface WeightTransition {
+  fromWeight: number;
+  toWeight: number;
+  startTimeMs: number;
+  durationMs: number;
+}
+
+interface ScalarTransition {
+  fromValue: number;
+  toValue: number;
+  startTimeMs: number;
+  durationMs: number;
 }
 
 const DEFAULT_LAYER_WEIGHTS: Record<PoseLayerId, number> = {
@@ -46,8 +61,24 @@ const ORIENTATION_CHANNELS: LogicalChannel[] = [
   'gaze_y',
 ];
 
+const LAYER_WEIGHT_TRANSITION_MS = 480;
+const IDLE_MOUTH_BLEND_TRANSITION_MS = 320;
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function easeInOutCubic(alpha: number): number {
+  if (alpha <= 0) {
+    return 0;
+  }
+  if (alpha >= 1) {
+    return 1;
+  }
+  if (alpha < 0.5) {
+    return 4 * alpha * alpha * alpha;
+  }
+  return 1 - ((-2 * alpha + 2) ** 3) / 2;
 }
 
 function sanitizeChannelValue(channel: LogicalChannel, value: number): number | null {
@@ -83,11 +114,15 @@ export class Live2DPoseMixerController {
 
   private idleMouthEnabled = true;
 
+  private idleMouthBlend = 1;
+
+  private idleMouthBlendTransition: ScalarTransition | null = null;
+
   private layers: Record<PoseLayerId, LayerState> = {
-    idle_layer: { weight: DEFAULT_LAYER_WEIGHTS.idle_layer, values: {} },
-    speech_layer: { weight: DEFAULT_LAYER_WEIGHTS.speech_layer, values: {} },
-    backend_pose_layer: { weight: DEFAULT_LAYER_WEIGHTS.backend_pose_layer, values: {} },
-    mouse_attention_layer: { weight: DEFAULT_LAYER_WEIGHTS.mouse_attention_layer, values: {} },
+    idle_layer: { weight: DEFAULT_LAYER_WEIGHTS.idle_layer, values: {}, weightTransition: null },
+    speech_layer: { weight: DEFAULT_LAYER_WEIGHTS.speech_layer, values: {}, weightTransition: null },
+    backend_pose_layer: { weight: DEFAULT_LAYER_WEIGHTS.backend_pose_layer, values: {}, weightTransition: null },
+    mouse_attention_layer: { weight: DEFAULT_LAYER_WEIGHTS.mouse_attention_layer, values: {}, weightTransition: null },
   };
 
   private readonly recordedIdleDriver = new RecordedIdleDriver((pose) => {
@@ -97,8 +132,9 @@ export class Live2DPoseMixerController {
   private lastFinalPose: PoseValues = {};
 
   private getMouseAttentionDragInput(): { x: number; y: number } {
+    const nowMs = performance.now();
     const layer = this.layers.mouse_attention_layer;
-    const layerWeight = layer?.weight;
+    const layerWeight = this.getResolvedLayerWeight('mouse_attention_layer', nowMs);
     if (!layer || typeof layerWeight !== 'number' || !Number.isFinite(layerWeight) || layerWeight <= 0) {
       return { x: 0, y: 0 };
     }
@@ -123,9 +159,14 @@ export class Live2DPoseMixerController {
    */
   public setLayerPose(layerId: PoseLayerId, values: PoseValues, weight?: number): void {
     this.layers[layerId] = {
-      weight: typeof weight === 'number' && Number.isFinite(weight) ? weight : this.layers[layerId].weight,
+      weight: this.layers[layerId].weight,
       values: { ...values },
+      weightTransition: this.layers[layerId].weightTransition,
     };
+    if (typeof weight === 'number' && Number.isFinite(weight)) {
+      this.transitionLayerWeight(layerId, weight);
+      return;
+    }
     this.refreshFinalPoseSnapshot();
   }
 
@@ -134,11 +175,15 @@ export class Live2DPoseMixerController {
    * Useful for backends that stream only changed channels.
    */
   public patchLayerPose(layerId: PoseLayerId, values: PoseValues, weight?: number): void {
-    const nextWeight = typeof weight === 'number' && Number.isFinite(weight) ? weight : this.layers[layerId].weight;
     this.layers[layerId] = {
-      weight: nextWeight,
+      weight: this.layers[layerId].weight,
       values: { ...this.layers[layerId].values, ...values },
+      weightTransition: this.layers[layerId].weightTransition,
     };
+    if (typeof weight === 'number' && Number.isFinite(weight)) {
+      this.transitionLayerWeight(layerId, weight);
+      return;
+    }
     this.refreshFinalPoseSnapshot();
   }
 
@@ -174,11 +219,7 @@ export class Live2DPoseMixerController {
     if (!Number.isFinite(weight) || weight < 0) {
       return;
     }
-    this.layers[layerId] = {
-      ...this.layers[layerId],
-      weight,
-    };
-    this.refreshFinalPoseSnapshot();
+    this.transitionLayerWeight(layerId, weight);
   }
 
   public patchLayerWeights(weights: Partial<Record<PoseLayerId, number>>): void {
@@ -188,10 +229,7 @@ export class Live2DPoseMixerController {
       if (typeof weight !== 'number' || !Number.isFinite(weight) || weight < 0) {
         return;
       }
-      this.layers[layerId] = {
-        ...this.layers[layerId],
-        weight,
-      };
+      this.transitionLayerWeight(layerId, weight, false);
       changed = true;
     });
 
@@ -202,10 +240,7 @@ export class Live2DPoseMixerController {
 
   public resetLayerWeights(): void {
     (Object.keys(DEFAULT_LAYER_WEIGHTS) as PoseLayerId[]).forEach((layerId) => {
-      this.layers[layerId] = {
-        ...this.layers[layerId],
-        weight: DEFAULT_LAYER_WEIGHTS[layerId],
-      };
+      this.transitionLayerWeight(layerId, DEFAULT_LAYER_WEIGHTS[layerId], false);
     });
     this.refreshFinalPoseSnapshot();
   }
@@ -245,8 +280,11 @@ export class Live2DPoseMixerController {
     const shouldEnableIdleMouth = this.idleState !== 'speaking';
     if (this.idleMouthEnabled !== shouldEnableIdleMouth) {
       this.idleMouthEnabled = shouldEnableIdleMouth;
-      this.refreshFinalPoseSnapshot();
+      this.transitionIdleMouthBlend(shouldEnableIdleMouth ? 1 : 0);
+      return;
     }
+
+    this.refreshFinalPoseSnapshot();
   }
 
   public setRecordedIdleBank(bank: IdleBankConfig | null): void {
@@ -270,22 +308,35 @@ export class Live2DPoseMixerController {
   }
 
   public getLayerStates(): Record<PoseLayerId, LayerState> {
+    const nowMs = performance.now();
     return {
       idle_layer: {
-        weight: this.layers.idle_layer.weight,
+        weight: this.getResolvedLayerWeight('idle_layer', nowMs),
         values: { ...this.layers.idle_layer.values },
+        weightTransition: this.layers.idle_layer.weightTransition
+          ? { ...this.layers.idle_layer.weightTransition }
+          : null,
       },
       speech_layer: {
-        weight: this.layers.speech_layer.weight,
+        weight: this.getResolvedLayerWeight('speech_layer', nowMs),
         values: { ...this.layers.speech_layer.values },
+        weightTransition: this.layers.speech_layer.weightTransition
+          ? { ...this.layers.speech_layer.weightTransition }
+          : null,
       },
       backend_pose_layer: {
-        weight: this.layers.backend_pose_layer.weight,
+        weight: this.getResolvedLayerWeight('backend_pose_layer', nowMs),
         values: { ...this.layers.backend_pose_layer.values },
+        weightTransition: this.layers.backend_pose_layer.weightTransition
+          ? { ...this.layers.backend_pose_layer.weightTransition }
+          : null,
       },
       mouse_attention_layer: {
-        weight: this.layers.mouse_attention_layer.weight,
+        weight: this.getResolvedLayerWeight('mouse_attention_layer', nowMs),
         values: { ...this.layers.mouse_attention_layer.values },
+        weightTransition: this.layers.mouse_attention_layer.weightTransition
+          ? { ...this.layers.mouse_attention_layer.weightTransition }
+          : null,
       },
     };
   }
@@ -299,6 +350,7 @@ export class Live2DPoseMixerController {
       modelUrl: this.modelUrl ?? null,
       idleState: this.idleState,
       idleMouthEnabled: this.idleMouthEnabled,
+      idleMouthBlend: this.getIdleMouthBlend(performance.now()),
       layers: this.getLayerStates(),
       finalPose: this.getFinalMixedPose(),
       profile: this.getProfile(),
@@ -393,30 +445,133 @@ export class Live2DPoseMixerController {
     w.Live2DPoseMixerDebug = debugApi;
   }
 
-  private getActiveLayers(): PoseLayer[] {
+  private transitionLayerWeight(layerId: PoseLayerId, targetWeight: number, refreshSnapshot: boolean = true): void {
+    const nowMs = performance.now();
+    const currentWeight = this.getResolvedLayerWeight(layerId, nowMs);
+    const normalizedTarget = Math.max(0, targetWeight);
+    this.layers[layerId] = {
+      ...this.layers[layerId],
+      weight: normalizedTarget,
+      weightTransition: Math.abs(currentWeight - normalizedTarget) <= 1e-4
+        ? null
+        : {
+          fromWeight: currentWeight,
+          toWeight: normalizedTarget,
+          startTimeMs: nowMs,
+          durationMs: LAYER_WEIGHT_TRANSITION_MS,
+        },
+    };
+
+    if (refreshSnapshot) {
+      this.refreshFinalPoseSnapshot();
+    }
+  }
+
+  private transitionIdleMouthBlend(targetValue: number): void {
+    const nowMs = performance.now();
+    const currentValue = this.getIdleMouthBlend(nowMs);
+    const normalizedTarget = clamp(targetValue, 0, 1);
+    this.idleMouthBlend = normalizedTarget;
+    this.idleMouthBlendTransition = Math.abs(currentValue - normalizedTarget) <= 1e-4
+      ? null
+      : {
+        fromValue: currentValue,
+        toValue: normalizedTarget,
+        startTimeMs: nowMs,
+        durationMs: IDLE_MOUTH_BLEND_TRANSITION_MS,
+      };
+    this.refreshFinalPoseSnapshot();
+  }
+
+  private getResolvedTransitionValue(
+    fromValue: number,
+    toValue: number,
+    startTimeMs: number,
+    durationMs: number,
+    nowMs: number,
+  ): number {
+    if (durationMs <= 0) {
+      return toValue;
+    }
+
+    const progress = clamp((nowMs - startTimeMs) / durationMs, 0, 1);
+    const alpha = easeInOutCubic(progress);
+    return fromValue + (toValue - fromValue) * alpha;
+  }
+
+  private getResolvedLayerWeight(layerId: PoseLayerId, nowMs: number = performance.now()): number {
+    const layer = this.layers[layerId];
+    const transition = layer.weightTransition;
+    if (!transition) {
+      return layer.weight;
+    }
+
+    const resolvedWeight = this.getResolvedTransitionValue(
+      transition.fromWeight,
+      transition.toWeight,
+      transition.startTimeMs,
+      transition.durationMs,
+      nowMs,
+    );
+
+    if (nowMs - transition.startTimeMs >= transition.durationMs) {
+      this.layers[layerId] = {
+        ...layer,
+        weightTransition: null,
+      };
+      return transition.toWeight;
+    }
+
+    return resolvedWeight;
+  }
+
+  private getIdleMouthBlend(nowMs: number = performance.now()): number {
+    const transition = this.idleMouthBlendTransition;
+    if (!transition) {
+      return this.idleMouthBlend;
+    }
+
+    const resolvedValue = this.getResolvedTransitionValue(
+      transition.fromValue,
+      transition.toValue,
+      transition.startTimeMs,
+      transition.durationMs,
+      nowMs,
+    );
+
+    if (nowMs - transition.startTimeMs >= transition.durationMs) {
+      this.idleMouthBlendTransition = null;
+      return transition.toValue;
+    }
+
+    return resolvedValue;
+  }
+
+  private getActiveLayers(nowMs: number = performance.now()): PoseLayer[] {
+    const idleMouthBlend = this.getIdleMouthBlend(nowMs);
     const layers: PoseLayer[] = [
       {
         id: 'idle_layer',
-        weight: this.layers.idle_layer.weight,
+        weight: this.getResolvedLayerWeight('idle_layer', nowMs),
         frame: isEmptyPose(this.layers.idle_layer.values) ? null : { values: this.layers.idle_layer.values },
         // 运行时策略：
         // - listening: 允许 recorded idle 的 mouth_open 参与
         // - speaking: 屏蔽 idle 的 mouth_open，嘴部交给语音链路（lip sync / speech）
-        mask: this.idleMouthEnabled ? undefined : { mouth_open: 0 },
+        mask: idleMouthBlend >= 0.999 ? undefined : { mouth_open: idleMouthBlend },
       },
       {
         id: 'speech_layer',
-        weight: this.layers.speech_layer.weight,
+        weight: this.getResolvedLayerWeight('speech_layer', nowMs),
         frame: isEmptyPose(this.layers.speech_layer.values) ? null : { values: this.layers.speech_layer.values },
       },
       {
         id: 'backend_pose_layer',
-        weight: this.layers.backend_pose_layer.weight,
+        weight: this.getResolvedLayerWeight('backend_pose_layer', nowMs),
         frame: isEmptyPose(this.layers.backend_pose_layer.values) ? null : { values: this.layers.backend_pose_layer.values },
       },
       {
         id: 'mouse_attention_layer',
-        weight: this.layers.mouse_attention_layer.weight,
+        weight: this.getResolvedLayerWeight('mouse_attention_layer', nowMs),
         frame: isEmptyPose(this.layers.mouse_attention_layer.values) ? null : { values: this.layers.mouse_attention_layer.values },
       },
     ];
@@ -425,7 +580,7 @@ export class Live2DPoseMixerController {
   }
 
   private refreshFinalPoseSnapshot(): void {
-    this.lastFinalPose = this.mixer.apply(this.getActiveLayers());
+    this.lastFinalPose = this.mixer.apply(this.getActiveLayers(performance.now()));
   }
 
   private applyParameterByMode(
@@ -453,10 +608,11 @@ export class Live2DPoseMixerController {
     this.refreshFinalPoseSnapshot();
     const finalPose: PoseValues = { ...this.lastFinalPose };
 
-    const isMouseOnlyMode = this.layers.mouse_attention_layer.weight > 0
-      && this.layers.idle_layer.weight <= 0
-      && this.layers.speech_layer.weight <= 0
-      && this.layers.backend_pose_layer.weight <= 0;
+    const nowMs = performance.now();
+    const isMouseOnlyMode = this.getResolvedLayerWeight('mouse_attention_layer', nowMs) > 0
+      && this.getResolvedLayerWeight('idle_layer', nowMs) <= 0
+      && this.getResolvedLayerWeight('speech_layer', nowMs) <= 0
+      && this.getResolvedLayerWeight('backend_pose_layer', nowMs) <= 0;
 
     if (isMouseOnlyMode) {
       ORIENTATION_CHANNELS.forEach((channel) => {
