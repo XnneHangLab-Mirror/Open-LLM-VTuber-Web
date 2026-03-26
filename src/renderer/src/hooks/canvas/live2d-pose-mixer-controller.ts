@@ -90,6 +90,10 @@ function sanitizeChannelValue(channel: LogicalChannel, value: number): number | 
     return clamp(value, 0, 1);
   }
 
+  if (channel === 'mouth_form') {
+    return clamp(value, -1, 1);
+  }
+
   if (channel === 'body_yaw' || channel === 'body_pitch' || channel === 'body_roll') {
     // Recorded idle clips can exceed the nominal [-1, 1] range on body channels.
     // Keep a wider safety band so large torso motion is preserved.
@@ -104,7 +108,15 @@ function isEmptyPose(values: PoseValues): boolean {
 }
 
 export class Live2DPoseMixerController {
-  private readonly mixer = new Mixer({ mouthOpen: { preferLayerId: 'speech_layer' } });
+  private readonly mixer = new Mixer({
+    preferredChannels: {
+      eye_l_open: ['idle_layer'],
+      eye_r_open: ['idle_layer'],
+      brow_raise: ['idle_layer'],
+      mouth_open: ['speech_layer', 'idle_layer'],
+      mouth_form: ['speech_layer', 'idle_layer'],
+    },
+  });
 
   private profile: Live2DParameterProfile = getDefaultLive2DParameterProfile();
 
@@ -555,9 +567,14 @@ export class Live2DPoseMixerController {
         weight: this.getResolvedLayerWeight('idle_layer', nowMs),
         frame: isEmptyPose(this.layers.idle_layer.values) ? null : { values: this.layers.idle_layer.values },
         // 运行时策略：
-        // - listening: 允许 recorded idle 的 mouth_open 参与
-        // - speaking: 屏蔽 idle 的 mouth_open，嘴部交给语音链路（lip sync / speech）
-        mask: idleMouthBlend >= 0.999 ? undefined : { mouth_open: idleMouthBlend },
+        // - listening: 允许 recorded idle 的嘴部曲线参与
+        // - speaking: 屏蔽 idle 的嘴部曲线，嘴部交给语音链路（lip sync / speech）
+        mask: idleMouthBlend >= 0.999
+          ? undefined
+          : {
+            mouth_open: idleMouthBlend,
+            mouth_form: idleMouthBlend,
+          },
       },
       {
         id: 'speech_layer',

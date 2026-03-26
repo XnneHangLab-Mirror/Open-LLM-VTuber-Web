@@ -81,6 +81,7 @@ const MOTION_PARAMETER_CHANNEL_MAP: Record<string, MotionParameterToChannel> = {
   ParamEyeLOpen: { channel: 'eye_l_open', normalizeScale: 1 },
   ParamEyeROpen: { channel: 'eye_r_open', normalizeScale: 1 },
   ParamMouthOpenY: { channel: 'mouth_open', normalizeScale: 1 },
+  ParamMouthForm: { channel: 'mouth_form', normalizeScale: 1 },
 };
 
 function clamp(value: number, min: number, max: number): number {
