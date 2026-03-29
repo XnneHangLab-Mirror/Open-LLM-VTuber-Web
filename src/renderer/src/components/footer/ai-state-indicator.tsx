@@ -28,8 +28,6 @@ function AIStateIndicator(): JSX.Element {
   return (
     <Box
       {...styles.container}
-      width="auto"
-      maxWidth="160px"
       px="3"
       gap="2"
       title={moodDescription}
@@ -46,6 +44,7 @@ function AIStateIndicator(): JSX.Element {
         fontSize="11px"
         lineHeight="1"
         color="whiteAlpha.900"
+        fontVariantNumeric="tabular-nums"
         aria-hidden="true"
       >
         {moodScore}

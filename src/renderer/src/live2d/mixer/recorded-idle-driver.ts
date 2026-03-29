@@ -48,6 +48,12 @@ interface ParsedIdleClip {
   channelCurves: Partial<Record<LogicalChannel, MotionKeyframe[]>>;
 }
 
+interface TransitionPlaybackSource {
+  clip: ParsedIdleClip | null;
+  clipStartTimeSeconds: number | null;
+  fallbackPose: PoseValues;
+}
+
 interface MotionParameterToChannel {
   channel: LogicalChannel;
   normalizeScale: number;
@@ -96,10 +102,10 @@ const LOOP_SEAM_BLEND_SECONDS = 0.0;
 // - 同 clip 循环边界（尾帧 -> 新一轮开头）
 // - random 切 clip（上一段 -> 下一段）
 // 该过渡发生在输出层，不计入 clip 播放时长。
-const CLIP_TRANSITION_BLEND_SECONDS = 1.0;
+const CLIP_TRANSITION_BLEND_SECONDS = 2.0;
 
 // 输出姿态的最终低通平滑，用于吸收采样抖动。
-const OUTPUT_POSE_SMOOTH_SECONDS = 0.22;
+const OUTPUT_POSE_SMOOTH_SECONDS = 0.44;
 
 function blendChannelValue(fromValue: number | undefined, toValue: number | undefined, alpha: number): number | null {
   const hasFrom = typeof fromValue === 'number' && Number.isFinite(fromValue);
@@ -460,7 +466,9 @@ export class RecordedIdleDriver {
 
   private activeClipStartTimeSeconds = 0;
 
-  private transitionFromPose: PoseValues | null = null;
+  private queuedTransitionSource: TransitionPlaybackSource | null = null;
+
+  private transitionSource: TransitionPlaybackSource | null = null;
 
   private transitionStartTimeSeconds: number | null = null;
 
@@ -485,8 +493,9 @@ export class RecordedIdleDriver {
 
   public setIdleBank(bank: IdleBankConfig | null): void {
     const normalized = normalizeIdleBankConfig(bank);
+    const transitionSource = this.captureCurrentTransitionSource();
     this.bank = normalized;
-    this.resetPlaybackState();
+    this.resetPlaybackState(transitionSource);
 
     if (!this.bank) {
       this.pushPose({});
@@ -494,8 +503,9 @@ export class RecordedIdleDriver {
   }
 
   public clearIdleBank(): void {
+    const transitionSource = this.captureCurrentTransitionSource();
     this.bank = null;
-    this.resetPlaybackState();
+    this.resetPlaybackState(transitionSource);
     this.pushPose({});
   }
 
@@ -570,7 +580,11 @@ export class RecordedIdleDriver {
           : this.samplePose(this.activeClip, duration);
         elapsed %= duration;
         this.activeClipStartTimeSeconds = nowSeconds - elapsed;
-        this.transitionFromPose = tailPose;
+        this.transitionSource = {
+          clip: null,
+          clipStartTimeSeconds: null,
+          fallbackPose: tailPose,
+        };
         this.transitionStartTimeSeconds = nowSeconds;
       } else {
         void this.selectNextClip(nowSeconds);
@@ -581,13 +595,13 @@ export class RecordedIdleDriver {
     const boundedElapsed = Math.min(Math.max(0, elapsed), duration);
     let pose = this.samplePoseWithLoopSeamBlend(this.activeClip, boundedElapsed);
 
-    if (this.transitionFromPose && this.transitionStartTimeSeconds !== null) {
+    if (this.transitionSource && this.transitionStartTimeSeconds !== null) {
       const transitionElapsed = nowSeconds - this.transitionStartTimeSeconds;
       const transitionAlpha = clamp(transitionElapsed / CLIP_TRANSITION_BLEND_SECONDS, 0, 1);
-      pose = blendPose(this.transitionFromPose, pose, transitionAlpha);
+      pose = blendPose(this.sampleTransitionSource(this.transitionSource, nowSeconds), pose, transitionAlpha);
 
       if (transitionAlpha >= 1) {
-        this.transitionFromPose = null;
+        this.transitionSource = null;
         this.transitionStartTimeSeconds = null;
       }
     }
@@ -614,7 +628,7 @@ export class RecordedIdleDriver {
     };
   }
 
-  private resetPlaybackState(): void {
+  private resetPlaybackState(queuedTransitionSource: TransitionPlaybackSource | null = null): void {
     this.requestToken += 1;
     this.isLoading = false;
     this.activeClip = null;
@@ -622,10 +636,51 @@ export class RecordedIdleDriver {
     this.activeClipSource = 'bank';
     this.previousClipIndex = -1;
     this.activeClipStartTimeSeconds = 0;
-    this.transitionFromPose = null;
+    this.queuedTransitionSource = queuedTransitionSource;
+    this.transitionSource = null;
     this.transitionStartTimeSeconds = null;
     this.smoothedPose = {};
     this.lastOutputTimeSeconds = null;
+  }
+
+  private captureCurrentTransitionSource(): TransitionPlaybackSource | null {
+    if (this.activeClip) {
+      return {
+        clip: this.activeClip,
+        clipStartTimeSeconds: this.activeClipStartTimeSeconds,
+        fallbackPose: { ...this.latestPose },
+      };
+    }
+
+    if (Object.keys(this.latestPose).length > 0) {
+      return {
+        clip: null,
+        clipStartTimeSeconds: null,
+        fallbackPose: { ...this.latestPose },
+      };
+    }
+
+    return null;
+  }
+
+  private sampleClipForTransition(clip: ParsedIdleClip, elapsedSeconds: number): PoseValues {
+    const duration = Math.max(0.001, clip.durationSeconds);
+    if (clip.loop) {
+      return this.samplePoseWithLoopSeamBlend(clip, elapsedSeconds % duration);
+    }
+
+    return this.samplePose(clip, Math.min(Math.max(0, elapsedSeconds), duration));
+  }
+
+  private sampleTransitionSource(source: TransitionPlaybackSource, nowSeconds: number): PoseValues {
+    if (source.clip && source.clipStartTimeSeconds !== null) {
+      return this.sampleClipForTransition(
+        source.clip,
+        Math.max(0, nowSeconds - source.clipStartTimeSeconds),
+      );
+    }
+
+    return { ...source.fallbackPose };
   }
 
   private pushPose(pose: PoseValues): void {
@@ -779,7 +834,8 @@ export class RecordedIdleDriver {
     source: IdleClipSource,
     clipIndex: number,
   ): void {
-    const previousPose = this.latestPose;
+    const previousSource = this.queuedTransitionSource ?? this.captureCurrentTransitionSource();
+    this.queuedTransitionSource = null;
 
     if (source === 'bank' && clipIndex >= 0) {
       this.previousClipIndex = clipIndex;
@@ -789,11 +845,11 @@ export class RecordedIdleDriver {
     this.activeClipIndex = clipIndex;
     this.activeClip = parsedClip;
     this.activeClipStartTimeSeconds = nowSeconds;
-    this.transitionFromPose = Object.keys(previousPose).length > 0 ? { ...previousPose } : null;
-    this.transitionStartTimeSeconds = this.transitionFromPose ? nowSeconds : null;
+    this.transitionSource = previousSource;
+    this.transitionStartTimeSeconds = this.transitionSource ? nowSeconds : null;
 
     const initialPose = this.samplePoseWithLoopSeamBlend(parsedClip, 0);
-    this.pushPose(this.transitionFromPose ? blendPose(this.transitionFromPose, initialPose, 0) : initialPose);
+    this.pushPose(this.transitionSource ? blendPose(this.sampleTransitionSource(this.transitionSource, nowSeconds), initialPose, 0) : initialPose);
   }
 
   private async selectClip(

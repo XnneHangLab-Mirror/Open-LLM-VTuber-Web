@@ -55,6 +55,33 @@ export class Mixer {
     return value;
   }
 
+  private getEffectiveChannelWeight(
+    activeLayers: PoseLayer[],
+    layerId: string,
+    channel: LogicalChannel,
+  ): number {
+    const layer = activeLayers.find((candidate) => candidate.id === layerId);
+    if (!layer) {
+      return 0;
+    }
+
+    const value = layer.frame?.values?.[channel];
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return 0;
+    }
+
+    const channelMask = layer.mask?.[channel];
+    const channelWeightMultiplier = typeof channelMask === 'number' && Number.isFinite(channelMask)
+      ? channelMask
+      : 1;
+    const effectiveWeight = layer.weight * channelWeightMultiplier;
+    if (!Number.isFinite(effectiveWeight) || effectiveWeight <= 0) {
+      return 0;
+    }
+
+    return effectiveWeight;
+  }
+
   /**
    * Blend multiple layers into a final (partial) pose.
    * - Missing channels are allowed
@@ -107,17 +134,34 @@ export class Mixer {
         return;
       }
 
+      let preferredWeightedSum = 0;
+      let preferredWeightSum = 0;
+
       for (let index = 0; index < preferredLayerIds.length; index += 1) {
-        const preferredValue = this.getEffectiveChannelValue(activeLayers, preferredLayerIds[index], channel);
+        const preferredLayerId = preferredLayerIds[index];
+        const preferredValue = this.getEffectiveChannelValue(activeLayers, preferredLayerId, channel);
         if (preferredValue === null) {
           continue;
         }
-        finalPose[channel] = preferredValue;
-        break;
+
+        const preferredWeight = this.getEffectiveChannelWeight(
+          activeLayers,
+          preferredLayerId,
+          channel,
+        );
+        if (preferredWeight <= 0) {
+          continue;
+        }
+
+        preferredWeightedSum += preferredValue * preferredWeight;
+        preferredWeightSum += preferredWeight;
+      }
+
+      if (preferredWeightSum > 0) {
+        finalPose[channel] = preferredWeightedSum / preferredWeightSum;
       }
     });
 
     return finalPose;
   }
 }
-
