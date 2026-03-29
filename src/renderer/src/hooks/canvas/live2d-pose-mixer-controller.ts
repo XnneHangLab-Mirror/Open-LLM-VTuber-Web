@@ -61,8 +61,57 @@ const ORIENTATION_CHANNELS: LogicalChannel[] = [
   'gaze_y',
 ];
 
-const LAYER_WEIGHT_TRANSITION_MS = 480;
-const IDLE_MOUTH_BLEND_TRANSITION_MS = 320;
+const LAYER_WEIGHT_TRANSITION_MS = 960;
+const IDLE_MOUTH_BLEND_TRANSITION_MS = 640;
+const CHANNEL_RELEASE_EPSILON = 0.01;
+
+const CHANNEL_NEUTRAL_VALUES: Record<LogicalChannel, number> = {
+  head_yaw: 0,
+  head_pitch: 0,
+  head_roll: 0,
+  body_yaw: 0,
+  body_pitch: 0,
+  body_roll: 0,
+  gaze_x: 0,
+  gaze_y: 0,
+  eye_l_open: 1,
+  eye_r_open: 1,
+  brow_raise: 0,
+  mouth_open: 0,
+  mouth_form: 0,
+};
+
+const CHANNEL_TRANSITION_MS: Record<LogicalChannel, number> = {
+  head_yaw: 360,
+  head_pitch: 360,
+  head_roll: 360,
+  body_yaw: 520,
+  body_pitch: 520,
+  body_roll: 520,
+  gaze_x: 240,
+  gaze_y: 240,
+  eye_l_open: 220,
+  eye_r_open: 220,
+  brow_raise: 360,
+  mouth_open: 180,
+  mouth_form: 240,
+};
+
+const CHANNEL_RELEASE_MS: Record<LogicalChannel, number> = {
+  head_yaw: 440,
+  head_pitch: 440,
+  head_roll: 440,
+  body_yaw: 600,
+  body_pitch: 600,
+  body_roll: 600,
+  gaze_x: 300,
+  gaze_y: 300,
+  eye_l_open: 240,
+  eye_r_open: 240,
+  brow_raise: 360,
+  mouth_open: 220,
+  mouth_form: 300,
+};
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -142,6 +191,10 @@ export class Live2DPoseMixerController {
   });
 
   private lastFinalPose: PoseValues = {};
+
+  private lastAppliedPose: PoseValues = {};
+
+  private lastPoseSmoothingTimeMs: number | null = null;
 
   private getMouseAttentionDragInput(): { x: number; y: number } {
     const nowMs = performance.now();
@@ -279,7 +332,13 @@ export class Live2DPoseMixerController {
   }
 
   public setModelUrl(modelUrl?: string): void {
+    if (this.modelUrl === modelUrl) {
+      return;
+    }
+
     this.modelUrl = modelUrl;
+    this.lastAppliedPose = {};
+    this.lastPoseSmoothingTimeMs = null;
     this.recordedIdleDriver.setModelUrl(modelUrl);
   }
 
@@ -365,6 +424,7 @@ export class Live2DPoseMixerController {
       idleMouthBlend: this.getIdleMouthBlend(performance.now()),
       layers: this.getLayerStates(),
       finalPose: this.getFinalMixedPose(),
+      appliedPose: { ...this.lastAppliedPose },
       profile: this.getProfile(),
       recordedIdle: this.getRecordedIdleState(),
     };
@@ -511,6 +571,63 @@ export class Live2DPoseMixerController {
     return fromValue + (toValue - fromValue) * alpha;
   }
 
+  private getChannelStepAlpha(durationMs: number, dtMs: number): number {
+    if (durationMs <= 0) {
+      return 1;
+    }
+
+    const safeDtMs = clamp(dtMs, 1000 / 240, 120);
+    return 1 - Math.exp(-safeDtMs / durationMs);
+  }
+
+  private getSmoothedPose(targetPose: PoseValues, nowMs: number): PoseValues {
+    const previousPose = this.lastAppliedPose;
+    const previousTimeMs = this.lastPoseSmoothingTimeMs;
+    this.lastPoseSmoothingTimeMs = nowMs;
+
+    if (previousTimeMs === null) {
+      this.lastAppliedPose = { ...targetPose };
+      return { ...targetPose };
+    }
+
+    const dtMs = Math.max(nowMs - previousTimeMs, 0);
+    const nextPose: PoseValues = {};
+    const channels = new Set<LogicalChannel>([
+      ...(Object.keys(targetPose) as LogicalChannel[]),
+      ...(Object.keys(previousPose) as LogicalChannel[]),
+    ]);
+
+    channels.forEach((channel) => {
+      const targetValue = targetPose[channel];
+      const previousValue = previousPose[channel];
+
+      if (typeof targetValue === 'number' && Number.isFinite(targetValue)) {
+        if (typeof previousValue !== 'number' || !Number.isFinite(previousValue)) {
+          nextPose[channel] = targetValue;
+          return;
+        }
+
+        const alpha = this.getChannelStepAlpha(CHANNEL_TRANSITION_MS[channel], dtMs);
+        nextPose[channel] = previousValue + (targetValue - previousValue) * alpha;
+        return;
+      }
+
+      if (typeof previousValue !== 'number' || !Number.isFinite(previousValue)) {
+        return;
+      }
+
+      const neutralValue = CHANNEL_NEUTRAL_VALUES[channel];
+      const alpha = this.getChannelStepAlpha(CHANNEL_RELEASE_MS[channel], dtMs);
+      const releasedValue = previousValue + (neutralValue - previousValue) * alpha;
+      if (Math.abs(releasedValue - neutralValue) > CHANNEL_RELEASE_EPSILON) {
+        nextPose[channel] = releasedValue;
+      }
+    });
+
+    this.lastAppliedPose = nextPose;
+    return { ...nextPose };
+  }
+
   private getResolvedLayerWeight(layerId: PoseLayerId, nowMs: number = performance.now()): number {
     const layer = this.layers[layerId];
     const transition = layer.weightTransition;
@@ -643,7 +760,8 @@ export class Live2DPoseMixerController {
       });
     }
 
-    const poseChannels = Object.keys(finalPose) as LogicalChannel[];
+    const smoothedPose = this.getSmoothedPose(finalPose, nowMs);
+    const poseChannels = Object.keys(smoothedPose) as LogicalChannel[];
     if (poseChannels.length === 0) {
       return false;
     }
@@ -651,7 +769,7 @@ export class Live2DPoseMixerController {
     let appliedAny = false;
 
     poseChannels.forEach((channel) => {
-      const rawValue = finalPose[channel];
+      const rawValue = smoothedPose[channel];
       if (typeof rawValue !== 'number') {
         return;
       }
