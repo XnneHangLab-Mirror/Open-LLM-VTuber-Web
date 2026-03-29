@@ -279,6 +279,62 @@ export const useLive2DModel = ({
     return { x, y };
   }, [getCanvasScale]);
 
+  const getModelScreenBounds = useCallback((model: any) => {
+    const drawableModel = model?._model;
+    const matrix = model?._modelMatrix?.getArray?.();
+    const drawableCount = drawableModel?.getDrawableCount?.();
+
+    if (!drawableModel || !matrix || !drawableCount) {
+      return null;
+    }
+
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+
+    for (let i = 0; i < drawableCount; i += 1) {
+      if (drawableModel.getDrawableDynamicFlagIsVisible && !drawableModel.getDrawableDynamicFlagIsVisible(i)) {
+        continue;
+      }
+
+      const vertices = drawableModel.getDrawableVertices(i);
+      if (!vertices || vertices.length < 2) {
+        continue;
+      }
+
+      for (let j = 0; j < vertices.length; j += 2) {
+        const vx = vertices[j];
+        const vy = vertices[j + 1];
+        const screenX = vx * matrix[0] + vy * matrix[4] + matrix[12];
+        const screenY = vx * matrix[1] + vy * matrix[5] + matrix[13];
+
+        minX = Math.min(minX, screenX);
+        minY = Math.min(minY, screenY);
+        maxX = Math.max(maxX, screenX);
+        maxY = Math.max(maxY, screenY);
+      }
+    }
+
+    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+      return null;
+    }
+
+    const width = Math.max(maxX - minX, 0.5);
+    const height = Math.max(maxY - minY, 0.5);
+
+    return {
+      minX,
+      minY,
+      maxX,
+      maxY,
+      centerX: (minX + maxX) * 0.5,
+      centerY: (minY + maxY) * 0.5,
+      halfWidth: width * 0.5,
+      halfHeight: height * 0.5,
+    };
+  }, []);
+
   const getPointerModelCoordinates = useCallback((clientX: number, clientY: number) => {
     const adapter = (window as any).getLAppAdapter?.();
     const view = LAppDelegate.getInstance().getView();
@@ -319,8 +375,9 @@ export const useLive2DModel = ({
       modelY,
       viewX,
       viewY,
+      screenBounds: getModelScreenBounds(model),
     };
-  }, [canvasRef]);
+  }, [canvasRef, getModelScreenBounds]);
 
   const finalizeDragPosition = useCallback(() => {
     const adapter = (window as any).getLAppAdapter?.();
@@ -354,10 +411,14 @@ export const useLive2DModel = ({
       return;
     }
 
-    // Keep mouse-attention input close to the legacy Cubism drag path:
-    // use view-space coordinates ([-1, 1] around visible area) rather than model-local matrix inversion.
-    const normalizedX = clamp(pointer.viewX, -1, 1);
-    const normalizedY = clamp(pointer.viewY, -1, 1);
+    // Drive mouse-attention relative to the model's current on-screen bounds,
+    // so pet-mode repositioning does not change the apparent look-at anchor.
+    const normalizedX = pointer.screenBounds
+      ? clamp((pointer.modelX - pointer.screenBounds.centerX) / pointer.screenBounds.halfWidth, -1, 1)
+      : clamp(pointer.viewX, -1, 1);
+    const normalizedY = pointer.screenBounds
+      ? clamp((pointer.modelY - pointer.screenBounds.centerY) / pointer.screenBounds.halfHeight, -1, 1)
+      : clamp(pointer.viewY, -1, 1);
     mouseFollowTargetPoseRef.current = {
       head_yaw: normalizedX,
       head_pitch: normalizedY,
