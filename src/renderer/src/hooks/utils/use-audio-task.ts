@@ -31,8 +31,8 @@ interface UseAudioTaskOptions {
 
 const TOOL_STATUS_ONLY_RE = /^\s*(?:<tool>\s*)?\[[^\]]+\]\s*(?:<\/tool>\s*)?$/i;
 const LIP_SYNC_SCALE = 2.0;
-const LIP_SYNC_ATTACK_SECONDS = 0.09;
-const LIP_SYNC_RELEASE_SECONDS = 0.18;
+const LIP_SYNC_ATTACK_SECONDS = 0.07;
+const LIP_SYNC_RELEASE_SECONDS = 0.14;
 const LIP_SYNC_MIN_DT_SECONDS = 1 / 240;
 const LIP_SYNC_MAX_DT_SECONDS = 0.12;
 
