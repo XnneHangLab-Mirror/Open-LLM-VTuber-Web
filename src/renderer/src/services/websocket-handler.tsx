@@ -82,6 +82,31 @@ function applyMixerWeights(
   }
 }
 
+function hasConcreteIdleBankInActions(actions: MessageEvent['actions']): boolean {
+  if (!actions) {
+    return false;
+  }
+
+  if (actions.idle_bank && typeof actions.idle_bank === 'object') {
+    return true;
+  }
+
+  return Array.isArray(actions.idle_list)
+    && actions.idle_list.some((entry) => typeof entry === 'string' && entry.trim().length > 0);
+}
+
+function hasConcreteMixerWeightsInActions(actions: MessageEvent['actions']): boolean {
+  if (!actions) {
+    return false;
+  }
+
+  if (actions.mixer_weights_mode === 'reset') {
+    return true;
+  }
+
+  return Object.keys(normalizeMixerWeights(actions.mixer_weights)).length > 0;
+}
+
 function resolveIdleBankFromActions(actions: MessageEvent['actions']): IdleBankConfig | null {
   if (!actions) {
     return null;
@@ -262,18 +287,16 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
       }
     }
 
-    if (message.actions && ('idle_bank' in message.actions || 'idle_list' in message.actions)) {
+    if (message.actions && hasConcreteIdleBankInActions(message.actions)) {
       const controller = getLive2DPoseMixerController();
       const idleBank = resolveIdleBankFromActions(message.actions);
       controller.setIdleRuntimeState(resolveIdleStateFromMessage(message));
       if (idleBank) {
         controller.setRecordedIdleBank(idleBank);
-      } else {
-        controller.clearRecordedIdleBank();
       }
     }
 
-    if (message.actions && ('mixer_weights' in message.actions || message.actions.mixer_weights_mode === 'reset')) {
+    if (message.actions && hasConcreteMixerWeightsInActions(message.actions)) {
       const controller = getLive2DPoseMixerController();
       controller.setIdleRuntimeState(resolveIdleStateFromMessage(message));
       applyMixerWeights(controller, {

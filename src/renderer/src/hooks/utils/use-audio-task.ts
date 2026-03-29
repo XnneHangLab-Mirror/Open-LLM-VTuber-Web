@@ -30,12 +30,30 @@ interface UseAudioTaskOptions {
 }
 
 const TOOL_STATUS_ONLY_RE = /^\s*(?:<tool>\s*)?\[[^\]]+\]\s*(?:<\/tool>\s*)?$/i;
+const LIP_SYNC_SCALE = 2.0;
+const LIP_SYNC_ATTACK_SECONDS = 0.07;
+const LIP_SYNC_RELEASE_SECONDS = 0.14;
+const LIP_SYNC_MIN_DT_SECONDS = 1 / 240;
+const LIP_SYNC_MAX_DT_SECONDS = 0.12;
 
 const isDisplayOnlyToolStatus = (options: AudioTaskOptions): boolean => {
   if (options.audioBase64 || !options.displayText?.text) {
     return false;
   }
   return TOOL_STATUS_ONLY_RE.test(options.displayText.text);
+};
+
+const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max);
+
+const smoothLipSyncValue = (previousValue: number, targetValue: number, deltaTimeSeconds: number): number => {
+  const dt = clamp(deltaTimeSeconds, LIP_SYNC_MIN_DT_SECONDS, LIP_SYNC_MAX_DT_SECONDS);
+  const timeConstant = targetValue > previousValue ? LIP_SYNC_ATTACK_SECONDS : LIP_SYNC_RELEASE_SECONDS;
+  if (timeConstant <= 0) {
+    return targetValue;
+  }
+
+  const alpha = 1 - Math.exp(-dt / timeConstant);
+  return previousValue + ((targetValue - previousValue) * alpha);
 };
 
 /**
@@ -180,8 +198,6 @@ export const useAudioTask = ({ managePlaybackCompletion = false }: UseAudioTaskO
           }
         };
 
-        const lipSyncScale = 2.0;
-
         audio.addEventListener('canplaythrough', () => {
           if (stateRef.current.aiState === 'interrupted' || !audioManager.hasCurrentAudio()) {
             console.warn('Audio playback cancelled due to interruption or audio was stopped');
@@ -205,20 +221,31 @@ export const useAudioTask = ({ managePlaybackCompletion = false }: UseAudioTaskO
             });
 
           if (model._wavFileHandler) {
-            if (!model._wavFileHandler._initialized) {
-              console.log('Applying enhanced lip sync');
-              model._wavFileHandler._initialized = true;
+            if (!model._wavFileHandler.__xnneLipSyncSmoothingInstalled) {
+              console.log('Applying smoothed lip sync');
+              model._wavFileHandler.__xnneLipSyncSmoothingInstalled = true;
+              model._wavFileHandler.__xnneLipSyncSmoothedRms = 0.0;
 
               const originalUpdate = model._wavFileHandler.update.bind(model._wavFileHandler);
               model._wavFileHandler.update = function (deltaTimeSeconds: number) {
                 const result = originalUpdate(deltaTimeSeconds);
                 // @ts-ignore
-                this._lastRms = Math.min(2.0, this._lastRms * lipSyncScale);
+                const previousValue = typeof this.__xnneLipSyncSmoothedRms === 'number'
+                  ? this.__xnneLipSyncSmoothedRms
+                  : 0.0;
+                // @ts-ignore
+                const scaledTarget = clamp(this._lastRms * LIP_SYNC_SCALE, 0.0, 2.0);
+                const smoothedValue = smoothLipSyncValue(previousValue, scaledTarget, deltaTimeSeconds);
+                // @ts-ignore
+                this.__xnneLipSyncSmoothedRms = smoothedValue;
+                // @ts-ignore
+                this._lastRms = smoothedValue;
                 return result;
               };
             }
 
             if (audioManager.hasCurrentAudio()) {
+              model._wavFileHandler.__xnneLipSyncSmoothedRms = 0.0;
               model._wavFileHandler.start(audioDataUrl);
             } else {
               console.warn('WavFileHandler start skipped - audio was stopped');

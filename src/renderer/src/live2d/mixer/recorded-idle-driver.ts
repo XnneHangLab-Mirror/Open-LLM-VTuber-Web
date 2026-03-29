@@ -421,6 +421,33 @@ export function normalizeIdleBankConfig(input: IdleBankConfig | null | undefined
   };
 }
 
+function getIdleBankPlaybackKey(bank: IdleBankConfig | null, modelUrl?: string): string {
+  if (!bank || bank.clips.length === 0) {
+    return '';
+  }
+
+  return bank.clips
+    .map((clip) => toAbsoluteUrl(clip.url, modelUrl))
+    .sort()
+    .join('|');
+}
+
+function areIdleBanksPlaybackCompatible(
+  left: IdleBankConfig | null,
+  right: IdleBankConfig | null,
+  modelUrl?: string,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return getIdleBankPlaybackKey(left, modelUrl) === getIdleBankPlaybackKey(right, modelUrl);
+}
+
 function normalizeIdlePlayCommand(input: IdlePlayCommand | string | null | undefined): IdlePlayCommand | null {
   if (typeof input === 'string') {
     const trimmed = input.trim();
@@ -493,8 +520,15 @@ export class RecordedIdleDriver {
 
   public setIdleBank(bank: IdleBankConfig | null): void {
     const normalized = normalizeIdleBankConfig(bank);
-    const transitionSource = this.captureCurrentTransitionSource();
+    const shouldPreservePlayback = this.activeClip !== null
+      && areIdleBanksPlaybackCompatible(this.bank, normalized, this.modelUrl);
     this.bank = normalized;
+
+    if (shouldPreservePlayback) {
+      return;
+    }
+
+    const transitionSource = this.captureCurrentTransitionSource();
     this.resetPlaybackState(transitionSource);
 
     if (!this.bank) {
