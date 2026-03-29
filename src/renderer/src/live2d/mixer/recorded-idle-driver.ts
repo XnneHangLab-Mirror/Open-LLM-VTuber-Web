@@ -421,6 +421,43 @@ export function normalizeIdleBankConfig(input: IdleBankConfig | null | undefined
   };
 }
 
+function areIdleClipsEquivalent(left: IdleBankClip, right: IdleBankClip): boolean {
+  const leftId = typeof left.id === 'string' ? left.id : undefined;
+  const rightId = typeof right.id === 'string' ? right.id : undefined;
+  const leftWeight = typeof left.weight === 'number' && Number.isFinite(left.weight) ? left.weight : undefined;
+  const rightWeight = typeof right.weight === 'number' && Number.isFinite(right.weight) ? right.weight : undefined;
+
+  return leftId === rightId
+    && left.url === right.url
+    && leftWeight === rightWeight;
+}
+
+function areIdleBanksEquivalent(left: IdleBankConfig | null, right: IdleBankConfig | null): boolean {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  if ((left.mode ?? 'random_no_repeat') !== (right.mode ?? 'random_no_repeat')) {
+    return false;
+  }
+
+  if (left.clips.length !== right.clips.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.clips.length; index += 1) {
+    if (!areIdleClipsEquivalent(left.clips[index], right.clips[index])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function normalizeIdlePlayCommand(input: IdlePlayCommand | string | null | undefined): IdlePlayCommand | null {
   if (typeof input === 'string') {
     const trimmed = input.trim();
@@ -505,8 +542,14 @@ export class RecordedIdleDriver {
 
   public setIdleBank(bank: IdleBankConfig | null): void {
     const normalized = normalizeIdleBankConfig(bank);
-    const transitionSource = this.captureCurrentTransitionSource();
+    const shouldPreservePlayback = areIdleBanksEquivalent(this.bank, normalized);
     this.bank = normalized;
+
+    if (shouldPreservePlayback) {
+      return;
+    }
+
+    const transitionSource = this.captureCurrentTransitionSource();
     this.resetPlaybackState('set_idle_bank', transitionSource);
 
     if (!this.bank) {
