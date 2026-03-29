@@ -480,6 +480,18 @@ export class RecordedIdleDriver {
 
   private lastOutputTimeSeconds: number | null = null;
 
+  private resetCount = 0;
+
+  private lastResetReason: string | null = null;
+
+  private lastResetAtSeconds: number | null = null;
+
+  private lastActivatedClipId: string | null = null;
+
+  private lastActivatedClipUrl: string | null = null;
+
+  private lastActivatedAtSeconds: number | null = null;
+
   constructor(private readonly onPose: (pose: PoseValues) => void) {}
 
   public setModelUrl(modelUrl?: string): void {
@@ -488,14 +500,14 @@ export class RecordedIdleDriver {
     }
 
     this.modelUrl = modelUrl;
-    this.resetPlaybackState();
+    this.resetPlaybackState('set_model_url');
   }
 
   public setIdleBank(bank: IdleBankConfig | null): void {
     const normalized = normalizeIdleBankConfig(bank);
     const transitionSource = this.captureCurrentTransitionSource();
     this.bank = normalized;
-    this.resetPlaybackState(transitionSource);
+    this.resetPlaybackState('set_idle_bank', transitionSource);
 
     if (!this.bank) {
       this.pushPose({});
@@ -505,7 +517,7 @@ export class RecordedIdleDriver {
   public clearIdleBank(): void {
     const transitionSource = this.captureCurrentTransitionSource();
     this.bank = null;
-    this.resetPlaybackState(transitionSource);
+    this.resetPlaybackState('clear_idle_bank', transitionSource);
     this.pushPose({});
   }
 
@@ -610,26 +622,49 @@ export class RecordedIdleDriver {
     this.pushPose(smoothedPose);
   }
 
-  public getDebugState() {
+  public getDebugState(nowSeconds: number = performance.now() * 0.001) {
     const clip = this.activeClipIndex >= 0 ? this.bank?.clips[this.activeClipIndex] : undefined;
+    const activeClipElapsedSeconds = this.activeClip
+      ? Math.max(0, nowSeconds - this.activeClipStartTimeSeconds)
+      : null;
+    const activeClipProgress = this.activeClip && activeClipElapsedSeconds !== null
+      ? clamp(activeClipElapsedSeconds / Math.max(0.001, this.activeClip.durationSeconds), 0, 1)
+      : null;
     return {
       hasBank: Boolean(this.bank),
       mode: this.bank?.mode ?? null,
       clipCount: this.bank?.clips.length ?? 0,
       isLoading: this.isLoading,
       modelUrl: this.modelUrl ?? null,
+      resetCount: this.resetCount,
+      lastResetReason: this.lastResetReason,
+      lastResetAtSeconds: this.lastResetAtSeconds,
       activeClipSource: this.activeClipSource,
       activeClipIndex: this.activeClipIndex,
       activeClipId: clip?.id ?? null,
       activeClipUrl: clip?.url ?? null,
       activeClipResolvedUrl: this.activeClip?.sourceUrl ?? null,
+      activeClipStartTimeSeconds: this.activeClip ? this.activeClipStartTimeSeconds : null,
+      activeClipElapsedSeconds,
+      activeClipProgress,
       activeClipDurationSeconds: this.activeClip?.durationSeconds ?? null,
+      hasQueuedTransitionSource: this.queuedTransitionSource !== null,
+      hasTransitionSource: this.transitionSource !== null,
+      lastActivatedClipId: this.lastActivatedClipId,
+      lastActivatedClipUrl: this.lastActivatedClipUrl,
+      lastActivatedAtSeconds: this.lastActivatedAtSeconds,
       latestPose: { ...this.latestPose },
     };
   }
 
-  private resetPlaybackState(queuedTransitionSource: TransitionPlaybackSource | null = null): void {
+  private resetPlaybackState(
+    reason: string,
+    queuedTransitionSource: TransitionPlaybackSource | null = null,
+  ): void {
     this.requestToken += 1;
+    this.resetCount += 1;
+    this.lastResetReason = reason;
+    this.lastResetAtSeconds = performance.now() * 0.001;
     this.isLoading = false;
     this.activeClip = null;
     this.activeClipIndex = -1;
@@ -833,6 +868,7 @@ export class RecordedIdleDriver {
     nowSeconds: number,
     source: IdleClipSource,
     clipIndex: number,
+    selectedClip: IdleBankClip,
   ): void {
     const previousSource = this.queuedTransitionSource ?? this.captureCurrentTransitionSource();
     this.queuedTransitionSource = null;
@@ -845,6 +881,9 @@ export class RecordedIdleDriver {
     this.activeClipIndex = clipIndex;
     this.activeClip = parsedClip;
     this.activeClipStartTimeSeconds = nowSeconds;
+    this.lastActivatedClipId = selectedClip.id ?? null;
+    this.lastActivatedClipUrl = selectedClip.url ?? null;
+    this.lastActivatedAtSeconds = nowSeconds;
     this.transitionSource = previousSource;
     this.transitionStartTimeSeconds = this.transitionSource ? nowSeconds : null;
 
@@ -877,7 +916,7 @@ export class RecordedIdleDriver {
       return;
     }
 
-    this.activateClip(parsedClip, nowSeconds, source, clipIndex);
+    this.activateClip(parsedClip, nowSeconds, source, clipIndex, selectedClip);
   }
 
   private async loadClip(resolvedUrl: string): Promise<ParsedIdleClip | null> {

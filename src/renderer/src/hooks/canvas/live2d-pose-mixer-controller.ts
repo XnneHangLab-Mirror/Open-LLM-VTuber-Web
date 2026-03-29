@@ -43,6 +43,48 @@ interface ScalarTransition {
   durationMs: number;
 }
 
+type DiagnosticChannel =
+  | 'head_yaw'
+  | 'body_yaw'
+  | 'body_roll'
+  | 'gaze_x'
+  | 'gaze_y'
+  | 'eye_l_open'
+  | 'eye_r_open'
+  | 'mouth_open'
+  | 'mouth_form';
+
+interface DiagnosticTraceOptions {
+  state?: string | 'all' | null;
+  throttleMs?: number;
+  console?: boolean;
+}
+
+interface PoseMixerDiagnosticTrace {
+  timestampMs: number;
+  timestampIso: string;
+  idleState: string;
+  idleMouthBlend: number;
+  isMouseOnlyMode: boolean;
+  dragInput: { x: number; y: number };
+  layerWeights: Record<PoseLayerId, number>;
+  layerValues: Record<PoseLayerId, Partial<Record<DiagnosticChannel, number>>>;
+  finalPose: Partial<Record<DiagnosticChannel, number>>;
+  appliedPose: Partial<Record<DiagnosticChannel, number>>;
+  recordedIdle: {
+    activeClipId: string | null;
+    activeClipResolvedUrl: string | null;
+    activeClipElapsedSeconds: number | null;
+    activeClipProgress: number | null;
+    resetCount: number;
+    lastResetReason: string | null;
+    lastResetAtSeconds: number | null;
+  };
+  playbackDebug: {
+    lastTalkAttempt: Record<string, unknown> | null;
+  };
+}
+
 const DEFAULT_LAYER_WEIGHTS: Record<PoseLayerId, number> = {
   idle_layer: 1,
   speech_layer: 1,
@@ -112,6 +154,18 @@ const CHANNEL_RELEASE_MS: Record<LogicalChannel, number> = {
   mouth_open: 220,
   mouth_form: 300,
 };
+
+const DIAGNOSTIC_CHANNELS: DiagnosticChannel[] = [
+  'head_yaw',
+  'body_yaw',
+  'body_roll',
+  'gaze_x',
+  'gaze_y',
+  'eye_l_open',
+  'eye_r_open',
+  'mouth_open',
+  'mouth_form',
+];
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -195,6 +249,20 @@ export class Live2DPoseMixerController {
   private lastAppliedPose: PoseValues = {};
 
   private lastPoseSmoothingTimeMs: number | null = null;
+
+  private diagnosticTraceEnabled = false;
+
+  private diagnosticTraceStateFilter: string | 'all' = 'speaking';
+
+  private diagnosticTraceThrottleMs = 160;
+
+  private diagnosticTraceToConsole = true;
+
+  private lastDiagnosticTraceAtMs: number | null = null;
+
+  private lastDiagnosticTrace: PoseMixerDiagnosticTrace | null = null;
+
+  private diagnosticTraceHistory: PoseMixerDiagnosticTrace[] = [];
 
   private getMouseAttentionDragInput(): { x: number; y: number } {
     const nowMs = performance.now();
@@ -422,12 +490,54 @@ export class Live2DPoseMixerController {
       idleState: this.idleState,
       idleMouthEnabled: this.idleMouthEnabled,
       idleMouthBlend: this.getIdleMouthBlend(performance.now()),
+      diagnosticTraceEnabled: this.diagnosticTraceEnabled,
+      diagnosticTraceStateFilter: this.diagnosticTraceStateFilter,
+      diagnosticTraceThrottleMs: this.diagnosticTraceThrottleMs,
+      lastDiagnosticTrace: this.lastDiagnosticTrace,
       layers: this.getLayerStates(),
       finalPose: this.getFinalMixedPose(),
       appliedPose: { ...this.lastAppliedPose },
       profile: this.getProfile(),
       recordedIdle: this.getRecordedIdleState(),
     };
+  }
+
+  public enableDiagnosticTrace(options: DiagnosticTraceOptions = {}): void {
+    const normalizedState = typeof options.state === 'string' && options.state.trim()
+      ? options.state.trim().toLowerCase()
+      : 'speaking';
+    this.diagnosticTraceEnabled = true;
+    this.diagnosticTraceStateFilter = normalizedState === 'all' ? 'all' : normalizedState;
+    this.diagnosticTraceThrottleMs = typeof options.throttleMs === 'number' && Number.isFinite(options.throttleMs)
+      ? Math.max(16, options.throttleMs)
+      : 160;
+    this.diagnosticTraceToConsole = options.console !== false;
+    this.lastDiagnosticTraceAtMs = null;
+    console.log('[Live2DPoseMixerTrace] enabled', {
+      state: this.diagnosticTraceStateFilter,
+      throttleMs: this.diagnosticTraceThrottleMs,
+      console: this.diagnosticTraceToConsole,
+    });
+  }
+
+  public disableDiagnosticTrace(): void {
+    this.diagnosticTraceEnabled = false;
+    this.lastDiagnosticTraceAtMs = null;
+    console.log('[Live2DPoseMixerTrace] disabled');
+  }
+
+  public getLastDiagnosticTrace(): PoseMixerDiagnosticTrace | null {
+    return this.lastDiagnosticTrace ? { ...this.lastDiagnosticTrace } : null;
+  }
+
+  public getDiagnosticTraceHistory(): PoseMixerDiagnosticTrace[] {
+    return this.diagnosticTraceHistory.map((entry) => ({ ...entry }));
+  }
+
+  public clearDiagnosticTraceHistory(): void {
+    this.diagnosticTraceHistory = [];
+    this.lastDiagnosticTrace = null;
+    this.lastDiagnosticTraceAtMs = null;
   }
 
   /**
@@ -511,6 +621,12 @@ export class Live2DPoseMixerController {
       },
       getProfile: () => this.getProfile(),
       setProfile: (profile: Live2DParameterProfile) => this.setProfile(profile),
+      enableDiagnosticTrace: (options?: DiagnosticTraceOptions) => this.enableDiagnosticTrace(options),
+      disableDiagnosticTrace: () => this.disableDiagnosticTrace(),
+      getLastDiagnosticTrace: () => this.getLastDiagnosticTrace(),
+      getDiagnosticTraceHistory: () => this.getDiagnosticTraceHistory(),
+      clearDiagnosticTraceHistory: () => this.clearDiagnosticTraceHistory(),
+      getPlaybackDebug: () => this.getPlaybackDebugState(),
     };
 
     w.Live2DPoseMixer = debugApi;
@@ -761,6 +877,13 @@ export class Live2DPoseMixerController {
     }
 
     const smoothedPose = this.getSmoothedPose(finalPose, nowMs);
+    this.maybeEmitDiagnosticTrace(
+      nowMs,
+      this.getMouseAttentionDragInput(),
+      finalPose,
+      smoothedPose,
+      isMouseOnlyMode,
+    );
     const poseChannels = Object.keys(smoothedPose) as LogicalChannel[];
     if (poseChannels.length === 0) {
       return false;
@@ -797,6 +920,95 @@ export class Live2DPoseMixerController {
     });
 
     return appliedAny;
+  }
+
+  private pickDiagnosticChannels(
+    values: PoseValues,
+  ): Partial<Record<DiagnosticChannel, number>> {
+    const picked: Partial<Record<DiagnosticChannel, number>> = {};
+    DIAGNOSTIC_CHANNELS.forEach((channel) => {
+      const value = values[channel];
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        picked[channel] = value;
+      }
+    });
+    return picked;
+  }
+
+  private getPlaybackDebugState(): { lastTalkAttempt: Record<string, unknown> | null } {
+    const playbackDebug = (window as any).Live2DPlaybackDebug;
+    const lastTalkAttempt = playbackDebug?.lastTalkAttempt
+      && typeof playbackDebug.lastTalkAttempt === 'object'
+      ? { ...playbackDebug.lastTalkAttempt }
+      : null;
+    return {
+      lastTalkAttempt,
+    };
+  }
+
+  private maybeEmitDiagnosticTrace(
+    nowMs: number,
+    dragInput: { x: number; y: number },
+    finalPose: PoseValues,
+    smoothedPose: PoseValues,
+    isMouseOnlyMode: boolean,
+  ): void {
+    if (!this.diagnosticTraceEnabled) {
+      return;
+    }
+
+    if (this.diagnosticTraceStateFilter !== 'all' && this.idleState !== this.diagnosticTraceStateFilter) {
+      return;
+    }
+
+    if (this.lastDiagnosticTraceAtMs !== null && nowMs - this.lastDiagnosticTraceAtMs < this.diagnosticTraceThrottleMs) {
+      return;
+    }
+
+    const recordedIdleState = this.getRecordedIdleState() as Record<string, unknown>;
+    const trace: PoseMixerDiagnosticTrace = {
+      timestampMs: nowMs,
+      timestampIso: new Date().toISOString(),
+      idleState: this.idleState,
+      idleMouthBlend: this.getIdleMouthBlend(nowMs),
+      isMouseOnlyMode,
+      dragInput,
+      layerWeights: {
+        idle_layer: this.getResolvedLayerWeight('idle_layer', nowMs),
+        speech_layer: this.getResolvedLayerWeight('speech_layer', nowMs),
+        backend_pose_layer: this.getResolvedLayerWeight('backend_pose_layer', nowMs),
+        mouse_attention_layer: this.getResolvedLayerWeight('mouse_attention_layer', nowMs),
+      },
+      layerValues: {
+        idle_layer: this.pickDiagnosticChannels(this.layers.idle_layer.values),
+        speech_layer: this.pickDiagnosticChannels(this.layers.speech_layer.values),
+        backend_pose_layer: this.pickDiagnosticChannels(this.layers.backend_pose_layer.values),
+        mouse_attention_layer: this.pickDiagnosticChannels(this.layers.mouse_attention_layer.values),
+      },
+      finalPose: this.pickDiagnosticChannels(finalPose),
+      appliedPose: this.pickDiagnosticChannels(smoothedPose),
+      recordedIdle: {
+        activeClipId: (recordedIdleState.activeClipId as string | null) ?? null,
+        activeClipResolvedUrl: (recordedIdleState.activeClipResolvedUrl as string | null) ?? null,
+        activeClipElapsedSeconds: (recordedIdleState.activeClipElapsedSeconds as number | null) ?? null,
+        activeClipProgress: (recordedIdleState.activeClipProgress as number | null) ?? null,
+        resetCount: typeof recordedIdleState.resetCount === 'number' ? recordedIdleState.resetCount : 0,
+        lastResetReason: (recordedIdleState.lastResetReason as string | null) ?? null,
+        lastResetAtSeconds: (recordedIdleState.lastResetAtSeconds as number | null) ?? null,
+      },
+      playbackDebug: this.getPlaybackDebugState(),
+    };
+
+    this.lastDiagnosticTraceAtMs = nowMs;
+    this.lastDiagnosticTrace = trace;
+    this.diagnosticTraceHistory.push(trace);
+    if (this.diagnosticTraceHistory.length > 40) {
+      this.diagnosticTraceHistory.shift();
+    }
+
+    if (this.diagnosticTraceToConsole) {
+      console.log('[Live2DPoseMixerTrace]', trace);
+    }
   }
 }
 
