@@ -421,18 +421,22 @@ export function normalizeIdleBankConfig(input: IdleBankConfig | null | undefined
   };
 }
 
-function areIdleClipsEquivalent(left: IdleBankClip, right: IdleBankClip): boolean {
-  const leftId = typeof left.id === 'string' ? left.id : undefined;
-  const rightId = typeof right.id === 'string' ? right.id : undefined;
-  const leftWeight = typeof left.weight === 'number' && Number.isFinite(left.weight) ? left.weight : undefined;
-  const rightWeight = typeof right.weight === 'number' && Number.isFinite(right.weight) ? right.weight : undefined;
+function getIdleBankPlaybackKey(bank: IdleBankConfig | null, modelUrl?: string): string {
+  if (!bank || bank.clips.length === 0) {
+    return '';
+  }
 
-  return leftId === rightId
-    && left.url === right.url
-    && leftWeight === rightWeight;
+  return bank.clips
+    .map((clip) => toAbsoluteUrl(clip.url, modelUrl))
+    .sort()
+    .join('|');
 }
 
-function areIdleBanksEquivalent(left: IdleBankConfig | null, right: IdleBankConfig | null): boolean {
+function areIdleBanksPlaybackCompatible(
+  left: IdleBankConfig | null,
+  right: IdleBankConfig | null,
+  modelUrl?: string,
+): boolean {
   if (left === right) {
     return true;
   }
@@ -441,21 +445,7 @@ function areIdleBanksEquivalent(left: IdleBankConfig | null, right: IdleBankConf
     return false;
   }
 
-  if ((left.mode ?? 'random_no_repeat') !== (right.mode ?? 'random_no_repeat')) {
-    return false;
-  }
-
-  if (left.clips.length !== right.clips.length) {
-    return false;
-  }
-
-  for (let index = 0; index < left.clips.length; index += 1) {
-    if (!areIdleClipsEquivalent(left.clips[index], right.clips[index])) {
-      return false;
-    }
-  }
-
-  return true;
+  return getIdleBankPlaybackKey(left, modelUrl) === getIdleBankPlaybackKey(right, modelUrl);
 }
 
 function normalizeIdlePlayCommand(input: IdlePlayCommand | string | null | undefined): IdlePlayCommand | null {
@@ -542,7 +532,8 @@ export class RecordedIdleDriver {
 
   public setIdleBank(bank: IdleBankConfig | null): void {
     const normalized = normalizeIdleBankConfig(bank);
-    const shouldPreservePlayback = areIdleBanksEquivalent(this.bank, normalized);
+    const shouldPreservePlayback = this.activeClip !== null
+      && areIdleBanksPlaybackCompatible(this.bank, normalized, this.modelUrl);
     this.bank = normalized;
 
     if (shouldPreservePlayback) {
