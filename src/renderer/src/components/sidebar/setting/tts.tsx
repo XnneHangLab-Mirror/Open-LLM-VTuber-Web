@@ -1,4 +1,4 @@
-/* eslint-disable react/no-unstable-nested-components */
+﻿/* eslint-disable react/no-unstable-nested-components */
 import {
   Button,
   Stack,
@@ -40,20 +40,20 @@ function TTS({ onSave, onCancel }: TTSProps): JSX.Element {
   const [error, setError] = useState('');
 
   const labels = useMemo(() => ({
-    speakerModel: isZh ? '语音模型' : 'Speaker Model',
+    speakerModel: isZh ? 'TTS 提供方' : 'TTS Provider',
     qwenPackage: isZh ? '启用 Qwen-TTS 服务' : 'Enable Qwen-TTS Service',
     qwenModel: isZh ? 'Qwen-TTS 规格' : 'Qwen-TTS Model',
     load: isZh ? '加载' : 'Load',
     reload: isZh ? '重载' : 'Reload',
     refresh: isZh ? '刷新状态' : 'Refresh Status',
     note: isZh
-      ? '注意：保存选择不会自动加载模型。未加载时会直接报错，不会偷偷热加载。'
+      ? '保存选择不会自动加载模型。未加载时会直接报错，不会热加载。'
       : 'Saving the selection does not load the model. Unloaded models fail directly and are never hot-loaded.',
     loaded: isZh ? '已加载' : 'Loaded',
     notLoaded: isZh ? '未加载' : 'Not loaded',
     configured: isZh ? '配置模型' : 'Configured model',
     active: isZh ? '当前已加载' : 'Loaded model',
-    enableHint: isZh ? '选择 qwen_tts 前需要打开服务开关。' : 'Enable the service before selecting qwen_tts.',
+    enableHint: isZh ? '选择 qwen_tts 之前需要先启用服务。' : 'Enable the service before selecting qwen_tts.',
     saveOk: isZh ? 'TTS 设置已保存' : 'TTS settings saved',
   }), [isZh]);
 
@@ -200,7 +200,7 @@ function TTS({ onSave, onCancel }: TTSProps): JSX.Element {
     );
   }
 
-  const speakerModel = draftConfig.agent?.speaker_model || 'gpt_sovits';
+  const speakerModel = draftConfig.agent?.tts?.provider || draftConfig.agent?.speaker_model || 'gpt_sovits';
   const qwenEnabled = Boolean(draftConfig.package?.qwen_tts);
   const qwenModel = draftConfig.agent?.qwen_tts?.model_name || '1.7b';
 
@@ -215,7 +215,10 @@ function TTS({ onSave, onCancel }: TTSProps): JSX.Element {
             ...prev,
             agent: {
               ...prev.agent,
-              speaker_model: next,
+              tts: {
+                ...prev.agent?.tts,
+                provider: next,
+              },
             },
           }));
         }}
@@ -308,3 +311,4 @@ function TTS({ onSave, onCancel }: TTSProps): JSX.Element {
 }
 
 export default TTS;
+
