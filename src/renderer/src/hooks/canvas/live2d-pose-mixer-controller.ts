@@ -685,12 +685,11 @@ export class Live2DPoseMixerController {
         frame: isEmptyPose(this.layers.idle_layer.values) ? null : { values: this.layers.idle_layer.values },
         // 运行时策略：
         // - listening: 允许 recorded idle 的嘴部曲线参与
-        // - speaking: 屏蔽 idle 的嘴部曲线，嘴部交给语音链路（lip sync / speech）
+        // - speaking: 仅屏蔽 idle 的 mouth_open，mouth_form 继续沿用 recorded idle
         mask: idleMouthBlend >= 0.999
           ? undefined
           : {
             mouth_open: idleMouthBlend,
-            mouth_form: idleMouthBlend,
           },
       },
       {
