@@ -38,28 +38,6 @@ const isDisplayOnlyToolStatus = (options: AudioTaskOptions): boolean => {
   return TOOL_STATUS_ONLY_RE.test(options.displayText.text);
 };
 
-function recordTalkMotionAttempt(model: any, payload: Record<string, unknown>): void {
-  const w = window as any;
-  const playbackDebug = (w.Live2DPlaybackDebug ??= {});
-  let motionCount: number | null = null;
-
-  try {
-    if (typeof model?._modelSetting?.getMotionCount === 'function') {
-      motionCount = model._modelSetting.getMotionCount('Talk');
-    }
-  } catch (error) {
-    console.warn('[Live2DPlaybackDebug] Failed to inspect Talk motion group:', error);
-  }
-
-  playbackDebug.lastTalkAttempt = {
-    timestampMs: performance.now(),
-    timestampIso: new Date().toISOString(),
-    group: 'Talk',
-    motionCount,
-    ...payload,
-  };
-}
-
 /**
  * Custom hook for handling audio playback tasks with Live2D lip sync
  */
@@ -177,20 +155,12 @@ export const useAudioTask = ({ managePlaybackCompletion = false }: UseAudioTaskO
 
         if (LAppDefine && LAppDefine.PriorityNormal) {
           console.log("Starting random 'Talk' motion");
-          const talkResult = model.startRandomMotion(
+          model.startRandomMotion(
             'Talk',
             LAppDefine.PriorityNormal,
           );
-          recordTalkMotionAttempt(model, {
-            status: 'attempted',
-            priority: LAppDefine.PriorityNormal,
-            result: talkResult,
-          });
         } else {
           console.warn("LAppDefine.PriorityNormal not found - cannot start talk motion");
-          recordTalkMotionAttempt(model, {
-            status: 'skipped_no_priority',
-          });
         }
 
         // A real audio segment should immediately replace the temporary tool-status layer.
