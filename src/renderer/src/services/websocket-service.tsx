@@ -30,6 +30,7 @@ export interface AudioPayload {
   display_text?: DisplayText;
   actions?: Actions;
   turn_id?: string;
+  tts_error?: boolean;
 }
 
 export interface Message {
@@ -107,6 +108,7 @@ export interface MessageEvent {
   forwarded?: boolean;
   display_text?: DisplayText;
   turn_id?: string;
+  tts_error?: boolean;
   live2d_model?: string;
   expression?: string | number;
   idle_state?: string;
