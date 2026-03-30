@@ -23,6 +23,7 @@ interface AudioTaskOptions {
   speaker_uid?: string
   forwarded?: boolean
   turnId?: string
+  ttsError?: boolean
 }
 
 interface UseAudioTaskOptions {
@@ -111,7 +112,9 @@ export const useAudioTask = ({ managePlaybackCompletion = false }: UseAudioTaskO
       return;
     }
 
-    const { audioBase64, displayText, expressions, forwarded, turnId } = options;
+    const {
+      audioBase64, displayText, expressions, forwarded, turnId, ttsError,
+    } = options;
     const isToolStatus = isDisplayOnlyToolStatus(options);
 
     if (displayText) {
@@ -265,6 +268,13 @@ export const useAudioTask = ({ managePlaybackCompletion = false }: UseAudioTaskO
 
         audio.load();
       } else {
+        if (ttsError) {
+          toaster.create({
+            title: t('error.ttsGenerationFailed', { defaultValue: '当前这句语音生成失败，已跳过。' }),
+            type: 'warning',
+            duration: 2000,
+          });
+        }
         resolve();
       }
     } catch (error) {

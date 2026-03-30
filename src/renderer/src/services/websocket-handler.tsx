@@ -427,6 +427,7 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
             expressions: message.actions?.expressions || null,
             forwarded: message.forwarded || false,
             turnId: message.turn_id,
+            ttsError: Boolean(message.tts_error),
           });
         }
         break;
