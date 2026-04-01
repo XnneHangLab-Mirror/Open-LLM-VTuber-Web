@@ -190,9 +190,7 @@ export const useAudioTask = ({ managePlaybackCompletion = false }: UseAudioTaskO
         }
 
         const audio = new Audio(audioDataUrl);
-        audioManager.setCurrentAudio(audio, model);
         let isFinished = false;
-
         const cleanup = () => {
           audioManager.clearCurrentAudio(audio);
           if (!isFinished) {
@@ -200,6 +198,7 @@ export const useAudioTask = ({ managePlaybackCompletion = false }: UseAudioTaskO
             resolve();
           }
         };
+        audioManager.setCurrentAudio(audio, model, cleanup);
 
         audio.addEventListener('canplaythrough', () => {
           if (stateRef.current.aiState === 'interrupted' || !audioManager.hasCurrentAudio()) {
@@ -266,6 +265,11 @@ export const useAudioTask = ({ managePlaybackCompletion = false }: UseAudioTaskO
           cleanup();
         });
 
+        audio.addEventListener('abort', () => {
+          console.log(`[PLAYBACK] audio element aborted: ${displayText?.text ?? ''}`);
+          cleanup();
+        });
+
         audio.load();
       } else {
         if (ttsError) {
@@ -301,6 +305,7 @@ export const useAudioTask = ({ managePlaybackCompletion = false }: UseAudioTaskO
     }
 
     playbackCompleteAckInFlightRef.current = true;
+    const completedTurnId = currentTurnIdRef.current;
 
     void (async () => {
       try {
@@ -309,8 +314,8 @@ export const useAudioTask = ({ managePlaybackCompletion = false }: UseAudioTaskO
           return;
         }
         stopCurrentAudioAndLipSync();
-        console.log('[PLAYBACK] frontend completed all queued audio for current turn');
-        sendMessage({ type: 'frontend-playback-complete', turn_id: currentTurnIdRef.current || undefined });
+        console.log(`[PLAYBACK] frontend completed all queued audio for turn: ${completedTurnId ?? 'unknown'}`);
+        sendMessage({ type: 'frontend-playback-complete', turn_id: completedTurnId || undefined });
         backendSynthCompleteRef.current = false;
         setBackendSynthComplete(false);
       } finally {
