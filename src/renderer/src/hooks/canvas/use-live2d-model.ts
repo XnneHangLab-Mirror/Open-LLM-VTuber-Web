@@ -12,6 +12,11 @@ import { LAppLive2DManager } from '../../../WebSDK/src/lapplive2dmanager';
 import { initializeLive2D } from '@cubismsdksamples/main';
 import { useMode } from '@/context/mode-context';
 import { getLive2DPoseMixerController } from '@/hooks/canvas/live2d-pose-mixer-controller';
+import {
+  createNeutralMouseFollowPose,
+  MouseFollowPose,
+  stepMouseFollowPose,
+} from '@/hooks/canvas/live2d-mouse-follow';
 
 interface UseLive2DModelProps {
   modelInfo: ModelInfo | undefined;
@@ -23,19 +28,8 @@ interface Position {
   y: number;
 }
 
-interface MouseFollowPose {
-  head_yaw: number;
-  head_pitch: number;
-  head_roll: number;
-  body_yaw: number;
-  gaze_x: number;
-  gaze_y: number;
-}
-
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 const MOUSE_FOLLOW_START_DELAY_MS = 2000;
-const MOUSE_FOLLOW_SMOOTH_TIME_SECONDS = 0.28;
-const MOUSE_FOLLOW_MAX_SPEED_PER_SECOND = 2.3;
 const LOCAL_POINTER_PRIORITY_WINDOW_MS = 120;
 
 // Thresholds for tap vs drag detection
@@ -119,22 +113,8 @@ export const useLive2DModel = ({
   const prevModelUrlRef = useRef<string | null>(null);
   const isHoveringModelRef = useRef(false);
   const mouseFollowEnableAtRef = useRef<number>(performance.now() + MOUSE_FOLLOW_START_DELAY_MS);
-  const mouseFollowPoseRef = useRef<MouseFollowPose>({
-    head_yaw: 0,
-    head_pitch: 0,
-    head_roll: 0,
-    body_yaw: 0,
-    gaze_x: 0,
-    gaze_y: 0,
-  });
-  const mouseFollowTargetPoseRef = useRef<MouseFollowPose>({
-    head_yaw: 0,
-    head_pitch: 0,
-    head_roll: 0,
-    body_yaw: 0,
-    gaze_x: 0,
-    gaze_y: 0,
-  });
+  const mouseFollowPoseRef = useRef<MouseFollowPose>(createNeutralMouseFollowPose());
+  const mouseFollowTargetPoseRef = useRef<MouseFollowPose>(createNeutralMouseFollowPose());
   const mouseFollowActiveRef = useRef<boolean>(false);
   const mouseFollowLastUpdateMsRef = useRef<number | null>(null);
   const localPointerPriorityUntilMsRef = useRef<number>(0);
@@ -147,22 +127,8 @@ export const useLive2DModel = ({
   // ---
 
   const resetMouseFollowSmoothing = useCallback(() => {
-    mouseFollowPoseRef.current = {
-      head_yaw: 0,
-      head_pitch: 0,
-      head_roll: 0,
-      body_yaw: 0,
-      gaze_x: 0,
-      gaze_y: 0,
-    };
-    mouseFollowTargetPoseRef.current = {
-      head_yaw: 0,
-      head_pitch: 0,
-      head_roll: 0,
-      body_yaw: 0,
-      gaze_x: 0,
-      gaze_y: 0,
-    };
+    mouseFollowPoseRef.current = createNeutralMouseFollowPose();
+    mouseFollowTargetPoseRef.current = createNeutralMouseFollowPose();
     mouseFollowActiveRef.current = false;
     mouseFollowLastUpdateMsRef.current = null;
   }, []);
@@ -449,24 +415,9 @@ export const useLive2DModel = ({
         const dtSeconds = clamp((nowMs - lastUpdateMs) * 0.001, 1 / 240, 0.1);
         mouseFollowLastUpdateMsRef.current = nowMs;
 
-        const alpha = 1 - Math.exp(-dtSeconds / MOUSE_FOLLOW_SMOOTH_TIME_SECONDS);
-        const maxStep = MOUSE_FOLLOW_MAX_SPEED_PER_SECOND * dtSeconds;
         const prev = mouseFollowPoseRef.current;
         const target = mouseFollowTargetPoseRef.current;
-        const smooth = (from: number, to: number): number => {
-          const interpolated = from + (to - from) * alpha;
-          const delta = clamp(interpolated - from, -maxStep, maxStep);
-          return clamp(from + delta, -1, 1);
-        };
-
-        const next: MouseFollowPose = {
-          head_yaw: smooth(prev.head_yaw, target.head_yaw),
-          head_pitch: smooth(prev.head_pitch, target.head_pitch),
-          head_roll: smooth(prev.head_roll, target.head_roll),
-          body_yaw: smooth(prev.body_yaw, target.body_yaw),
-          gaze_x: smooth(prev.gaze_x, target.gaze_x),
-          gaze_y: smooth(prev.gaze_y, target.gaze_y),
-        };
+        const next = stepMouseFollowPose(prev, target, dtSeconds);
 
         mouseFollowPoseRef.current = next;
         poseMixerController.setMouseAttentionPose(next);
