@@ -555,6 +555,8 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
       case 'set-live2d-appearance': {
         if (typeof message.expression === 'string') {
           setPersistentAppearance(message.expression);
+        } else {
+          setPersistentAppearance(undefined);
         }
         break;
       }
