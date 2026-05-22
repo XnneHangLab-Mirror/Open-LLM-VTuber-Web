@@ -66,7 +66,7 @@ export const useAudioTask = ({ managePlaybackCompletion = false }: UseAudioTaskO
   const { setSubtitleText } = useSubtitle();
   const { appendResponse, appendAIMessage } = useChatHistory();
   const { sendMessage } = useWebSocket();
-  const { setExpression } = useLive2DExpression();
+  const { setExpression, resetExpression } = useLive2DExpression();
 
   // State refs to avoid stale closures
   const stateRef = useRef({
@@ -145,11 +145,15 @@ export const useAudioTask = ({ managePlaybackCompletion = false }: UseAudioTaskO
     try {
       if (audioBase64) {
         if (expressions?.[0] !== undefined) {
-          setExpression(
-            expressions[0],
-            undefined,
-            `Queued transient expression: ${expressions[0]}`,
-          );
+          if (expressions[0] === '__neutral__') {
+            resetExpression();
+          } else {
+            setExpression(
+              expressions[0],
+              undefined,
+              `Queued transient expression: ${expressions[0]}`,
+            );
+          }
         }
 
         const audioDataUrl = `data:audio/wav;base64,${audioBase64}`;
