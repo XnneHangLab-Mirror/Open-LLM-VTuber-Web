@@ -56,6 +56,9 @@ export interface ModelInfo {
   /** Default emotion */
   defaultEmotion?: number | string;
 
+  /** Expression catalog from backend preset (name → file path) */
+  expressionCatalog?: Array<{ name: string; label: string; file: string }>;
+
   /** Emotion mapping configuration */
   emotionMap: EmotionMap;
 
