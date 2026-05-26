@@ -197,7 +197,7 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
   const { clearResponse, setForceNewMessage, appendHumanMessage, appendOrUpdateToolCallMessage } = useChatHistory();
   const { addAudioTask } = useAudioTask({ managePlaybackCompletion: true });
   const bgUrlContext = useBgUrl();
-  const { confUid, setConfName, setConfUid, setConfigFiles } = useConfig();
+  const { confUid, setConfName, setConfUid, setAsrEnabled, setConfigFiles } = useConfig();
   const [pendingModelInfo, setPendingModelInfo] = useState<ModelInfo | undefined>(undefined);
   const { setSelfUid, setGroupMembers, setIsOwner } = useGroup();
   const { startMic, stopMic, autoStartMicOnConvEnd } = useVAD();
@@ -364,6 +364,7 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
         if (message.client_uid) {
           setSelfUid(message.client_uid);
         }
+        setAsrEnabled(message.asr_enabled !== false);
         setPendingModelInfo(message.model_info);
         // setModelInfo(message.model_info);
         // We don't know when the confRef in live2d-config-context will be updated, so we set a delay here for convenience
@@ -503,8 +504,10 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
         toaster.create({
           title: message.message,
           type: 'error',
-          duration: 2000,
+          duration: 3000,
         });
+        // Reset AI state so "Thinking..." doesn't linger after an error
+        setAiState('idle');
         break;
       case 'group-update':
         console.log('Received group-update:', message.members);

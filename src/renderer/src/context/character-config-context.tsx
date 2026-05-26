@@ -18,9 +18,11 @@ export interface ConfigFile {
 interface CharacterConfigState {
   confName: string;
   confUid: string;
+  asrEnabled: boolean;
   configFiles: ConfigFile[];
   setConfName: (name: string) => void;
   setConfUid: (uid: string) => void;
+  setAsrEnabled: (enabled: boolean) => void;
   setConfigFiles: (files: ConfigFile[]) => void;
   getFilenameByName: (name: string) => string | undefined;
 }
@@ -47,6 +49,7 @@ export const ConfigContext = createContext<CharacterConfigState | null>(null);
 export function CharacterConfigProvider({ children }: { children: React.ReactNode }) {
   const [confName, setConfName] = useState<string>(DEFAULT_CONFIG.confName);
   const [confUid, setConfUid] = useState<string>(DEFAULT_CONFIG.confUid);
+  const [asrEnabled, setAsrEnabled] = useState<boolean>(true);
   const [configFiles, setConfigFiles] = useState<ConfigFile[]>(DEFAULT_CONFIG.configFiles);
 
   const getFilenameByName = useCallback(
@@ -59,13 +62,15 @@ export function CharacterConfigProvider({ children }: { children: React.ReactNod
     () => ({
       confName,
       confUid,
+      asrEnabled,
       configFiles,
       setConfName,
       setConfUid,
+      setAsrEnabled,
       setConfigFiles,
       getFilenameByName,
     }),
-    [confName, confUid, configFiles, getFilenameByName],
+    [confName, confUid, asrEnabled, configFiles, getFilenameByName],
   );
 
   useEffect(() => {
