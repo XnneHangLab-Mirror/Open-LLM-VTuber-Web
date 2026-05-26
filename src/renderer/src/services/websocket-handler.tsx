@@ -409,6 +409,21 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
         if (message.files) {
           bgUrlContext?.setBackgroundFiles(message.files);
         }
+        // Force background image reload after reconnection.
+        // The browser may have cached a failed request from when the backend
+        // wasn't running yet. Appending a cache-bust query forces a re-fetch.
+        if (bgUrlContext) {
+          const currentBg = bgUrlContext.backgroundUrl;
+          if (currentBg) {
+            try {
+              const url = new URL(currentBg.startsWith('http') ? currentBg : `${baseUrl}${currentBg}`);
+              url.searchParams.set('_t', String(Date.now()));
+              bgUrlContext.setBackgroundUrl(url.toString());
+            } catch {
+              bgUrlContext.resetBackground();
+            }
+          }
+        }
         break;
       case 'audio':
         if (message.turn_id && currentTurnIdRef.current && message.turn_id !== currentTurnIdRef.current) {
