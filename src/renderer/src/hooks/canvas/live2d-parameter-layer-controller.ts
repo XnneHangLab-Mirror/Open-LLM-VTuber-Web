@@ -106,13 +106,23 @@ function resolveAssetUrl(modelUrl: string, relativePath: string): string {
   return new URL(relativePath, modelUrl).toString();
 }
 
-async function getExpressionCatalog(modelUrl: string): Promise<ResolvedExpressionReference[]> {
+async function getExpressionCatalog(modelInfo: ModelInfo): Promise<ResolvedExpressionReference[]> {
+  const modelUrl = modelInfo.url;
   const cached = expressionCatalogCache.get(modelUrl);
   if (cached) {
     return cached;
   }
 
   const loader = (async () => {
+    // Prefer backend-provided expressionCatalog (covers loose exp3 files not declared in model3.json)
+    if (modelInfo.expressionCatalog && modelInfo.expressionCatalog.length > 0) {
+      return modelInfo.expressionCatalog.map((entry) => ({
+        expressionName: entry.name,
+        fileUrl: resolveAssetUrl(modelUrl, entry.file),
+      }));
+    }
+
+    // Fallback: parse from model3.json FileReferences.Expressions
     const model3 = await fetchJson<Model3File>(modelUrl);
     return (model3.FileReferences?.Expressions ?? [])
       .filter((expression): expression is ExpressionReference & { Name: string; File: string } =>
@@ -131,7 +141,7 @@ async function resolveExpressionReference(
   modelInfo: ModelInfo,
   selector: ExpressionSelector,
 ): Promise<ResolvedExpressionReference | null> {
-  const catalog = await getExpressionCatalog(modelInfo.url);
+  const catalog = await getExpressionCatalog(modelInfo);
 
   if (typeof selector === 'number') {
     return catalog[selector] ?? null;
