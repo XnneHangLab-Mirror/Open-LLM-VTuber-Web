@@ -86,6 +86,9 @@ function setupIPC(): void {
   });
 }
 
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId("com.electron");
 

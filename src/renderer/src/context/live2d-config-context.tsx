@@ -73,6 +73,9 @@ export interface ModelInfo {
 
   /** Initial scale */
   initialScale?: number;
+
+  /** Render resolution scale (0.25-1.0), controlled by lab.toml */
+  renderScale?: number;
 }
 
 /**

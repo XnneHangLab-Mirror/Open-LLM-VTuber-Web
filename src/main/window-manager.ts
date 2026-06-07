@@ -80,6 +80,7 @@ export class WindowManager {
         sandbox: false,
         contextIsolation: true,
         nodeIntegration: true,
+        backgroundThrottling: false,
       },
       hasShadow: false,
       paintWhenInitiallyHidden: true,

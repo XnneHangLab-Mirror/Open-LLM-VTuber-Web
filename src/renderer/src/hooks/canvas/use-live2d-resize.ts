@@ -102,6 +102,13 @@ export const useLive2DResize = ({
     const currentScale = lastScaleRef.current;
     const diff = clampedTargetScale - currentScale;
 
+    if (Math.abs(diff) < 0.001) {
+      applyScale(clampedTargetScale);
+      lastScaleRef.current = clampedTargetScale;
+      isAnimatingRef.current = false;
+      return;
+    }
+
     const newScale = currentScale + diff * EASING_FACTOR;
     applyScale(newScale);
     lastScaleRef.current = newScale;
@@ -192,7 +199,8 @@ export const useLive2DResize = ({
         return;
       }
 
-      const dpr = window.devicePixelRatio || 1;
+      const renderScale = modelInfo?.renderScale ?? 1.0;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2) * renderScale;
       canvas.width = Math.round(width * dpr);
       canvas.height = Math.round(height * dpr);
       canvas.style.width = `${width}px`;
@@ -209,7 +217,7 @@ export const useLive2DResize = ({
     } catch (error) {
       isResizingRef.current = false;
     }
-  }, [isPet, containerRef, modelInfo?.kScale, modelInfo?.initialXshift, modelInfo?.initialYshift, showSidebar, beforeResize, canvasRef]);
+  }, [isPet, containerRef, modelInfo?.kScale, modelInfo?.initialXshift, modelInfo?.initialYshift, modelInfo?.renderScale, showSidebar, beforeResize, canvasRef]);
 
   // Immediately respond to sidebar state changes
   useEffect(() => {

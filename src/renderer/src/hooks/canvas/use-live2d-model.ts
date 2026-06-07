@@ -728,7 +728,7 @@ export const useLive2DModel = ({
 
     const intervalId = window.setInterval(() => {
       void syncCursorFollow();
-    }, 33);
+    }, 100);
 
     return () => {
       isDisposed = true;
