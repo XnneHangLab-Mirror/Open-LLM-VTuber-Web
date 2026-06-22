@@ -17,7 +17,7 @@ export const inputSubtitleStyles = {
   },
 
   box: {
-    w: '400px',
+    w: '500px',
     rounded: 'xl',
     overflow: 'hidden',
     boxShadow: 'lg',
@@ -111,5 +111,40 @@ export const inputSubtitleStyles = {
       color: 'whiteAlpha.800',
     },
     zIndex: 10,
+  },
+} as const;
+
+export const petBubbleStyles = {
+  container: {
+    p: '4',
+    minH: '60px',
+    maxH: '200px',
+    overflow: 'hidden',
+  },
+
+  text: {
+    color: 'white',
+    fontSize: 'xl',
+    fontFamily: '"Zihun Buding", cursive',
+    lineHeight: '1.6',
+    letterSpacing: '0.02em',
+    whiteSpace: 'pre-wrap' as const,
+    animation: 'petBubbleFadeIn 0.4s ease-out',
+    css: {
+      '@keyframes petBubbleFadeIn': {
+        from: { opacity: 0, transform: 'translateY(6px)' },
+        to: { opacity: 1, transform: 'translateY(0)' },
+      },
+    },
+  },
+
+  collapsedText: {
+    color: 'whiteAlpha.600',
+    fontSize: 'xs',
+    fontFamily: '"Zihun Buding", cursive',
+    lineHeight: '1.4',
+    mb: '2',
+    maxW: '100%',
+    transition: 'all 0.3s ease',
   },
 } as const;

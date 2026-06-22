@@ -24,11 +24,11 @@ export function useInputSubtitle() {
   const { interrupt } = useInterrupt();
 
   const lastAIMessage = messages
-    .filter((msg) => msg.role === 'ai')
+    .filter((msg) => msg.role === 'ai' && msg.type !== 'tool_call_status')
     .slice(-1)
     .map((msg) => msg.content)[0];
 
-  const hasAIMessages = messages.some((msg) => msg.role === 'ai');
+  const hasAIMessages = messages.some((msg) => msg.role === 'ai' && msg.type !== 'tool_call_status');
 
   const handleInterrupt = () => {
     interrupt();
