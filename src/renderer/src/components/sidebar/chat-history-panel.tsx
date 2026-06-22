@@ -5,7 +5,7 @@
 /* eslint-disable import/order */
 /* eslint-disable import/no-extraneous-dependencies */
 /* eslint-disable react/require-default-props */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Box, Spinner, Flex, Text, Icon, Image } from '@chakra-ui/react';
 import { sidebarStyles, chatPanelStyles } from './sidebar-styles';
 import { MainContainer, ChatContainer, MessageList as ChatMessageList, Message as ChatMessage, Avatar as ChatAvatar } from '@chatscope/chat-ui-kit-react';
@@ -22,6 +22,33 @@ import {
   DialogCloseTrigger,
   DialogBody,
 } from '@/components/ui/dialog';
+import ToolChainIndicator from './tool-chain-indicator';
+import type { Message } from '@/services/websocket-service';
+
+type GroupedItem =
+  | { kind: 'message'; msg: Message }
+  | { kind: 'tool_group'; tools: Message[] };
+
+function groupMessages(msgs: Message[]): GroupedItem[] {
+  const result: GroupedItem[] = [];
+  let toolBuf: Message[] = [];
+
+  for (const msg of msgs) {
+    if (msg.type === 'tool_call_status') {
+      toolBuf.push(msg);
+    } else {
+      if (toolBuf.length > 0) {
+        result.push({ kind: 'tool_group', tools: toolBuf });
+        toolBuf = [];
+      }
+      result.push({ kind: 'message', msg });
+    }
+  }
+  if (toolBuf.length > 0) {
+    result.push({ kind: 'tool_group', tools: toolBuf });
+  }
+  return result;
+}
 
 // Main component
 function ChatHistoryPanel(): JSX.Element {
@@ -38,6 +65,8 @@ function ChatHistoryPanel(): JSX.Element {
      (msg.type === 'tool_call_status' && msg.status === 'completed') || // Keep completed tools
      (msg.type === 'tool_call_status' && msg.status === 'error'), // Keep error tools
   );
+
+  const grouped = useMemo(() => groupMessages(validMessages), [validMessages]);
 
   return (
     <Box
@@ -61,48 +90,12 @@ function ChatHistoryPanel(): JSX.Element {
                 {t('sidebar.noMessages')}
               </Box>
             ) : (
-              validMessages.map((msg) => {
-                // Check if it's a tool call message
-                if (msg.type === 'tool_call_status') {
-                  return (
-                    // Render Tool Call Indicator using msg properties
-                    <Flex
-                      key={msg.id} // Use tool_id as key
-                      {...sidebarStyles.toolCallIndicator.container}
-                      alignItems="center"
-                    >
-                      <Icon
-                        as={FaTools}
-                        {...sidebarStyles.toolCallIndicator.icon}
-                      />
-                      <Text {...sidebarStyles.toolCallIndicator.text}>
-                        {/* {msg.tool_name}: {msg.status === 'running' ? 'Running...' : msg.content} */}
-                        {msg.status === "running" ? `${msg.name} is using tool ${msg.tool_name}` : `${msg.name} used tool ${msg.tool_name}`}
-                      </Text>
-                      {/* Show spinner if running, checkmark if completed, maybe error icon? */}
-                      {msg.status === "running" && (
-                        <Spinner
-                          size="xs"
-                          color={sidebarStyles.toolCallIndicator.spinner.color}
-                          ml={sidebarStyles.toolCallIndicator.spinner.ml}
-                        />
-                      )}
-                      {msg.status === "completed" && (
-                        <Icon
-                          as={FaCheck}
-                          {...sidebarStyles.toolCallIndicator.completedIcon}
-                        />
-                      )}
-                      {/* Optional: Add an error icon */}
-                      {msg.status === "error" && (
-                        <Icon
-                          as={FaTimes}
-                          {...sidebarStyles.toolCallIndicator.errorIcon}
-                        />
-                      )}
-                    </Flex>
-                  );
-                } 
+              grouped.map((item) => {
+                if (item.kind === 'tool_group') {
+                  const groupKey = item.tools.map((t) => t.id).join('-');
+                  return <ToolChainIndicator key={groupKey} tools={item.tools} />;
+                }
+                const msg = item.msg;
                 // Render Standard Chat Message (human or ai text)
                 const hasImages = msg.images && msg.images.length > 0;
                 const messageText = msg.content || (hasImages ? t('sidebar.imageMessage') : '');

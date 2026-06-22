@@ -17,6 +17,7 @@ import { inputSubtitleStyles } from './electron-style';
 import { useMode } from '@/context/mode-context';
 import { useMood } from '@/context/mood-context';
 import { PetBubble } from './pet-bubble';
+import ToolChainFloatingCard from './tool-chain-floating-card';
 
 function getMoodPresentation(score: number) {
   if (score >= 90) {
@@ -43,6 +44,7 @@ export function InputSubtitle() {
     handleSend,
     lastAIMessage,
     hasAIMessages,
+    toolCallMessages,
     aiState,
     micOn,
   } = useInputSubtitle();
@@ -120,6 +122,10 @@ export function InputSubtitle() {
         >
           <LuX size={12} />
         </IconButton>
+
+        {toolCallMessages.length > 0 && (
+          <ToolChainFloatingCard tools={toolCallMessages} />
+        )}
 
         {hasAIMessages && (
           <PetBubble text={lastAIMessage} />

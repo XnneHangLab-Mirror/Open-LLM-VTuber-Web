@@ -1,4 +1,4 @@
-import { ChangeEvent, KeyboardEvent } from 'react';
+import { ChangeEvent, KeyboardEvent, useMemo } from 'react';
 import { useChatHistory } from '@/context/chat-history-context';
 import { useVAD } from '@/context/vad-context';
 import { useMicToggle } from '@/hooks/utils/use-mic-toggle';
@@ -30,6 +30,18 @@ export function useInputSubtitle() {
 
   const hasAIMessages = messages.some((msg) => msg.role === 'ai' && msg.type !== 'tool_call_status');
 
+  const toolCallMessages = useMemo(() => {
+    const toolMsgs = messages.filter((msg) => msg.type === 'tool_call_status');
+    if (toolMsgs.length === 0) return [];
+    const lastTextIdx = messages.reduce(
+      (acc, msg, i) => (msg.role === 'ai' && msg.type !== 'tool_call_status' ? i : acc), -1
+    );
+    return toolMsgs.filter((_, i) => {
+      const realIdx = messages.indexOf(toolMsgs[i]);
+      return realIdx > lastTextIdx;
+    });
+  }, [messages]);
+
   const handleInterrupt = () => {
     interrupt();
     if (autoStartMicOn) {
@@ -56,6 +68,7 @@ export function useInputSubtitle() {
     handleMicToggle,
     lastAIMessage,
     hasAIMessages,
+    toolCallMessages,
     aiState,
     micOn,
     handleSend,
