@@ -114,6 +114,10 @@ export function InputSubtitle() {
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
+      {toolCallMessages.length > 0 && (
+        <ToolChainFloatingCard tools={toolCallMessages} />
+      )}
+
       <Box {...inputSubtitleStyles.box}>
         <IconButton
           aria-label="Close subtitle"
@@ -122,10 +126,6 @@ export function InputSubtitle() {
         >
           <LuX size={12} />
         </IconButton>
-
-        {toolCallMessages.length > 0 && (
-          <ToolChainFloatingCard tools={toolCallMessages} />
-        )}
 
         {hasAIMessages && (
           <PetBubble text={lastAIMessage} />

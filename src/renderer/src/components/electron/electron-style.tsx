@@ -3,8 +3,9 @@ import { SystemStyleObject } from '@chakra-ui/react';
 export const inputSubtitleStyles = {
   container: {
     display: 'flex',
-    alignItems: 'flex-end',
-    justifyContent: 'center',
+    flexDirection: 'column' as const,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
     maxW: 'fit-content',
     position: 'absolute' as const,
     bottom: '120px',
