@@ -112,18 +112,8 @@ app.whenReady().then(() => {
     return false;
   });
 
-  // if (process.env.NODE_ENV === "development") {
-  //   globalShortcut.register("F12", () => {
-  //     const window = windowManager.getWindow();
-  //     if (!window) return;
-
-  //     if (window.webContents.isDevToolsOpened()) {
-  //       window.webContents.closeDevTools();
-  //     } else {
-  //       window.webContents.openDevTools();
-  //     }
-  //   });
-  // }
+  // 在主窗口上注册快捷键（F12 DevTools 开关、Ctrl+R 拦截等）
+  optimizer.watchWindowShortcuts(window);
 
   setupIPC();
 

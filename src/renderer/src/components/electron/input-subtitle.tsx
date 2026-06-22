@@ -8,7 +8,6 @@ import {
   Input,
   Stack,
   Text,
-  VStack,
   IconButton,
 } from '@chakra-ui/react';
 import { useState, useEffect, useCallback } from 'react';
@@ -17,6 +16,7 @@ import { useDraggable } from '@/hooks/electron/use-draggable';
 import { inputSubtitleStyles } from './electron-style';
 import { useMode } from '@/context/mode-context';
 import { useMood } from '@/context/mood-context';
+import { PetBubble } from './pet-bubble';
 
 function getMoodPresentation(score: number) {
   if (score >= 90) {
@@ -122,16 +122,7 @@ export function InputSubtitle() {
         </IconButton>
 
         {hasAIMessages && (
-          <VStack
-            minH={lastAIMessage ? '32px' : '0px'}
-            {...inputSubtitleStyles.messageStack}
-          >
-            {lastAIMessage && (
-              <Text {...inputSubtitleStyles.messageText}>
-                {lastAIMessage}
-              </Text>
-            )}
-          </VStack>
+          <PetBubble text={lastAIMessage} />
         )}
 
         <Box {...inputSubtitleStyles.statusBox}>
