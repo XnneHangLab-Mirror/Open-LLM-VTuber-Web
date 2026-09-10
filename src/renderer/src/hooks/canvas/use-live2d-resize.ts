@@ -6,12 +6,10 @@ import { ModelInfo } from '@/context/live2d-config-context';
 import { LAppDelegate } from '../../../WebSDK/src/lappdelegate';
 import { LAppLive2DManager } from '../../../WebSDK/src/lapplive2dmanager';
 import { useMode } from '@/context/mode-context';
+import { clampScale, nextWheelScale, readSavedScale, saveScale, scaleStorageKey } from './live2d-scale';
 
 // Constants for model scaling behavior
-const MIN_SCALE = 0.1;
-const MAX_SCALE = 5.0;
 const EASING_FACTOR = 0.3; // Controls animation smoothness
-const WHEEL_SCALE_STEP = 0.03; // Scale change per wheel tick
 const DEFAULT_SCALE = 1.0; // Default scale if not specified
 
 interface UseLive2DResizeProps {
@@ -21,7 +19,7 @@ interface UseLive2DResizeProps {
 }
 
 /**
- * Applies scale to both model and view matrices
+ * Applies user scale to the model, including subsequent render-loop fitting.
  * @param scale - The scale value to apply
  */
 export const applyScale = (scale: number) => {
@@ -32,8 +30,8 @@ export const applyScale = (scale: number) => {
     const model = manager.getModel(0);
     if (!model) return;
 
-    // @ts-ignore
-    model._modelMatrix.scale(scale, scale);
+    model.userScale = scale;
+    model.getModelMatrix()?.scale(scale, scale);
   } catch (error) {
     console.debug('Model not ready for scaling yet');
   }
@@ -55,6 +53,7 @@ export const useLive2DResize = ({
   const isResizingRef = useRef<boolean>(false);
 
   // Initialize scale references
+  const scaleKey = modelInfo?.url ? scaleStorageKey(modelInfo.url, mode) : undefined;
   const initialScale = modelInfo?.kScale || DEFAULT_SCALE;
   const lastScaleRef = useRef<number>(initialScale);
   const targetScaleRef = useRef<number>(initialScale);
@@ -72,7 +71,8 @@ export const useLive2DResize = ({
    * Reset scale state when model changes
    */
   useEffect(() => {
-    const newInitialScale = modelInfo?.kScale || DEFAULT_SCALE;
+    const fallback = modelInfo?.kScale || DEFAULT_SCALE;
+    const newInitialScale = scaleKey ? readSavedScale(scaleKey, fallback) : clampScale(fallback);
     lastScaleRef.current = newInitialScale;
     targetScaleRef.current = newInitialScale;
     hasAppliedInitialScale.current = false;
@@ -82,22 +82,27 @@ export const useLive2DResize = ({
       isAnimatingRef.current = false;
     }
 
+    const restoreScale = () => {
+      if (scaleKey) applyScale(lastScaleRef.current);
+    };
+    restoreScale();
+    window.addEventListener("live2d-model-ready", restoreScale);
     const resizeHandle = requestAnimationFrame(() => {
       handleResize();
     });
 
-    return () => cancelAnimationFrame(resizeHandle);
-  }, [modelInfo?.url, modelInfo?.kScale]);
+    return () => {
+      cancelAnimationFrame(resizeHandle);
+      window.removeEventListener("live2d-model-ready", restoreScale);
+    };
+  }, [scaleKey, modelInfo?.kScale]);
 
   /**
    * Smooth animation loop for scaling
    * Uses linear interpolation for smooth transitions
    */
   const animateEase = useCallback(() => {
-    const clampedTargetScale = Math.max(
-      MIN_SCALE,
-      Math.min(MAX_SCALE, targetScaleRef.current),
-    );
+    const clampedTargetScale = clampScale(targetScaleRef.current);
 
     const currentScale = lastScaleRef.current;
     const diff = clampedTargetScale - currentScale;
@@ -120,26 +125,22 @@ export const useLive2DResize = ({
    * Handles mouse wheel events for scaling
    * Initiates smooth scaling animation
    */
-  const handleWheel = useCallback((e: WheelEvent) => {
-    e.preventDefault();
-    if (!modelInfo?.scrollToResize) return;
+  const handleWheel = useCallback(
+    (e: WheelEvent) => {
+      if (!modelInfo?.scrollToResize || !scaleKey || e.deltaY === 0) return;
+      e.preventDefault();
 
-    const direction = e.deltaY > 0 ? -1 : 1;
-    const increment = WHEEL_SCALE_STEP * direction;
+      const newTargetScale = nextWheelScale(targetScaleRef.current, e.deltaY);
+      targetScaleRef.current = newTargetScale;
+      saveScale(scaleKey, newTargetScale);
 
-    const currentActualScale = lastScaleRef.current;
-    const newTargetScale = Math.max(
-      MIN_SCALE,
-      Math.min(MAX_SCALE, currentActualScale + increment),
-    );
-
-    targetScaleRef.current = newTargetScale;
-
-    if (!isAnimatingRef.current) {
-      isAnimatingRef.current = true;
-      animationFrameRef.current = requestAnimationFrame(animateEase);
-    }
-  }, [modelInfo?.scrollToResize, animateEase]);
+      if (!isAnimatingRef.current) {
+        isAnimatingRef.current = true;
+        animationFrameRef.current = requestAnimationFrame(animateEase);
+      }
+    },
+    [modelInfo?.scrollToResize, scaleKey, animateEase],
+  );
 
   /**
    * Pre-process container resize

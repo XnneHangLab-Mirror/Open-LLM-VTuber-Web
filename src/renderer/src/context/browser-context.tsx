@@ -23,14 +23,12 @@ export interface BrowserViewData {
 interface BrowserContextType {
   browserViewData: BrowserViewData | null;
   setBrowserViewData: (data: BrowserViewData) => void;
-  clearBrowserViewData: () => void;
 }
 
 // Create context with default values
 export const BrowserContext = createContext<BrowserContextType>({
   browserViewData: null,
   setBrowserViewData: () => {},
-  clearBrowserViewData: () => {},
 });
 
 // Provider component
@@ -41,16 +39,11 @@ export function BrowserProvider({ children }: { children: ReactNode }) {
     setBrowserViewDataState(data);
   }, []);
 
-  const clearBrowserViewData = useCallback(() => {
-    setBrowserViewDataState(null);
-  }, []);
-
   return (
     <BrowserContext.Provider
       value={{
         browserViewData,
         setBrowserViewData,
-        clearBrowserViewData,
       }}
     >
       {children}

@@ -25,7 +25,6 @@ import About from './about';
 interface SettingUIProps {
   open: boolean;
   onClose: () => void;
-  onToggle: () => void;
 }
 
 function SettingUI({ open, onClose }: SettingUIProps): JSX.Element {

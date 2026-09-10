@@ -176,6 +176,11 @@ export class LAppLive2DManager {
           projection.scale(height / width, 1.0);
         }
 
+        // Window fitting must not overwrite the user's wheel zoom.
+        if (model.userScale !== undefined) {
+          model.getModelMatrix().scale(model.userScale, model.userScale);
+        }
+
         // 必要があればここで乗算
         if (this._viewMatrix != null) {
           projection.multiplyByMatrix(this._viewMatrix);

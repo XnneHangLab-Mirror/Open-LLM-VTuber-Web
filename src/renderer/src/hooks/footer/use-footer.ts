@@ -42,7 +42,7 @@ export const useFooter = () => {
         startMic();
       }
     } else if (settings.allowButtonTrigger) {
-      sendTriggerSignal(-1);
+      sendTriggerSignal();
     }
   };
 
