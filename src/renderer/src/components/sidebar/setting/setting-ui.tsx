@@ -19,7 +19,6 @@ import { settingStyles } from './setting-styles';
 import General from './general';
 import Live2D from './live2d';
 import ASR from './asr';
-import TTS from './tts';
 import Agent from './agent';
 import About from './about';
 
@@ -76,9 +75,6 @@ function SettingUI({ open, onClose }: SettingUIProps): JSX.Element {
         </Tabs.Content>
         <Tabs.Content value="asr" {...settingStyles.settingUI.tabs.content}>
           <ASR onSave={handleSaveCallback} onCancel={handleCancelCallback} />
-        </Tabs.Content>
-        <Tabs.Content value="tts" {...settingStyles.settingUI.tabs.content}>
-          <TTS />
         </Tabs.Content>
         <Tabs.Content value="agent" {...settingStyles.settingUI.tabs.content}>
           <Agent
@@ -138,12 +134,6 @@ function SettingUI({ open, onClose }: SettingUIProps): JSX.Element {
                 {...settingStyles.settingUI.tabs.trigger}
               >
                 {t('settings.tabs.asr')}
-              </Tabs.Trigger>
-              <Tabs.Trigger
-                value="tts"
-                {...settingStyles.settingUI.tabs.trigger}
-              >
-                {t('settings.tabs.tts')}
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="agent"
