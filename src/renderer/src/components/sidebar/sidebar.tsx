@@ -164,7 +164,6 @@ function Sidebar({ isCollapsed = false, onToggle }: SidebarProps): JSX.Element {
         <SettingUI
           open={settingsOpen}
           onClose={onSettingsClose}
-          onToggle={onToggle}
         />
       )}
     </Box>

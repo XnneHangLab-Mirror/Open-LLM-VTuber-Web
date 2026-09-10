@@ -7,11 +7,10 @@ export function useTriggerSpeak() {
   const { captureAllMedia } = useMediaCapture();
 
   const sendTriggerSignal = useCallback(
-    async (actualIdleTime: number) => {
+    async () => {
       const images = await captureAllMedia();
       sendMessage({
         type: "ai-speak-signal",
-        idle_time: actualIdleTime,
         images,
       });
     },

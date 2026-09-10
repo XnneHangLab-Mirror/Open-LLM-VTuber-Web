@@ -3,7 +3,6 @@ import { useInterrupt } from "@/components/canvas/live2d";
 import { useMicToggle } from "./use-mic-toggle";
 import { useLive2DConfig } from "@/context/live2d-config-context";
 import { useSwitchCharacter } from "@/hooks/utils/use-switch-character";
-import { useForceIgnoreMouse } from "@/hooks/utils/use-force-ignore-mouse";
 import { useMode } from "@/context/mode-context";
 
 export function useIpcHandlers() {
@@ -11,8 +10,7 @@ export function useIpcHandlers() {
   const { interrupt } = useInterrupt();
   const { modelInfo, setModelInfo } = useLive2DConfig();
   const { switchCharacter } = useSwitchCharacter();
-  const { setForceIgnoreMouse } = useForceIgnoreMouse();
-  const { mode } = useMode();
+  const { mode, setForceIgnoreMouse } = useMode();
   const isPet = mode === 'pet';
 
   const micToggleHandler = useCallback(() => {

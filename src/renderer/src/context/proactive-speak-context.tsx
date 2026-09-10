@@ -34,14 +34,12 @@ export function ProactiveSpeakProvider({ children }: { children: ReactNode }) {
   const { sendTriggerSignal } = useTriggerSpeak();
 
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const idleStartTimeRef = useRef<number | null>(null);
 
   const clearIdleTimer = useCallback(() => {
     if (idleTimerRef.current) {
       clearTimeout(idleTimerRef.current);
       idleTimerRef.current = null;
     }
-    idleStartTimeRef.current = null;
   }, []);
 
   const startIdleTimer = useCallback(() => {
@@ -49,10 +47,8 @@ export function ProactiveSpeakProvider({ children }: { children: ReactNode }) {
 
     if (!settings.allowProactiveSpeak) return;
 
-    idleStartTimeRef.current = Date.now();
     idleTimerRef.current = setTimeout(() => {
-      const actualIdleTime = (Date.now() - idleStartTimeRef.current!) / 1000;
-      sendTriggerSignal(actualIdleTime);
+      sendTriggerSignal();
     }, settings.idleSecondsToSpeak * 1000);
   }, [settings.allowProactiveSpeak, settings.idleSecondsToSpeak, sendTriggerSignal, clearIdleTimer]);
 

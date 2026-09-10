@@ -1,6 +1,5 @@
-/* eslint-disable global-require */
-/* eslint-disable @typescript-eslint/no-var-requires */
 /* eslint-disable no-use-before-define */
+import i18next from 'i18next';
 import { Subject } from 'rxjs';
 import { ModelInfo } from '@/context/live2d-config-context';
 import { HistoryInfo } from '@/context/websocket-context';
@@ -134,17 +133,6 @@ export interface MessageEvent {
   };
 }
 
-// Get translation function for error messages
-const getTranslation = () => {
-  try {
-    const i18next = require('i18next').default;
-    return i18next.t.bind(i18next);
-  } catch (e) {
-    // Fallback if i18next is not available
-    return (key: string) => key;
-  }
-};
-
 class WebSocketService {
   private static instance: WebSocketService;
 
@@ -153,8 +141,6 @@ class WebSocketService {
   private messageSubject = new Subject<MessageEvent>();
 
   private stateSubject = new Subject<'CONNECTING' | 'OPEN' | 'CLOSING' | 'CLOSED'>();
-
-  private currentState: 'CONNECTING' | 'OPEN' | 'CLOSING' | 'CLOSED' = 'CLOSED';
 
   static getInstance() {
     if (!WebSocketService.instance) {
@@ -186,11 +172,9 @@ class WebSocketService {
 
     try {
       this.ws = new WebSocket(url);
-      this.currentState = 'CONNECTING';
       this.stateSubject.next('CONNECTING');
 
       this.ws.onopen = () => {
-        this.currentState = 'OPEN';
         this.stateSubject.next('OPEN');
         this.initializeConnection();
       };
@@ -202,7 +186,7 @@ class WebSocketService {
         } catch (error) {
           console.error('Failed to parse WebSocket message:', error);
           toaster.create({
-            title: `${getTranslation()('error.failedParseWebSocket')}: ${error}`,
+            title: `${i18next.t('error.failedParseWebSocket')}: ${error}`,
             type: "error",
             duration: 2000,
           });
@@ -210,17 +194,14 @@ class WebSocketService {
       };
 
       this.ws.onclose = () => {
-        this.currentState = 'CLOSED';
         this.stateSubject.next('CLOSED');
       };
 
       this.ws.onerror = () => {
-        this.currentState = 'CLOSED';
         this.stateSubject.next('CLOSED');
       };
     } catch (error) {
       console.error('Failed to connect to WebSocket:', error);
-      this.currentState = 'CLOSED';
       this.stateSubject.next('CLOSED');
     }
   }
@@ -231,7 +212,7 @@ class WebSocketService {
     } else {
       console.warn('WebSocket is not open. Unable to send message:', message);
       toaster.create({
-        title: getTranslation()('error.websocketNotOpen'),
+        title: i18next.t('error.websocketNotOpen'),
         type: 'error',
         duration: 2000,
       });
@@ -249,10 +230,6 @@ class WebSocketService {
   disconnect() {
     this.ws?.close();
     this.ws = null;
-  }
-
-  getCurrentState() {
-    return this.currentState;
   }
 }
 

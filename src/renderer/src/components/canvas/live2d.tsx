@@ -11,7 +11,6 @@ import { useAiState, AiStateEnum } from "@/context/ai-state-context";
 import { useLive2DExpression } from "@/hooks/canvas/use-live2d-expression";
 import { useLive2DAppearance } from "@/hooks/canvas/use-live2d-appearance";
 import { useLive2DPoseMixer } from "@/hooks/canvas/use-live2d-pose-mixer";
-import { useForceIgnoreMouse } from "@/hooks/utils/use-force-ignore-mouse";
 import { useMode } from "@/context/mode-context";
 
 interface Live2DProps {
@@ -20,9 +19,8 @@ interface Live2DProps {
 
 export const Live2D = memo(
   ({ showSidebar }: Live2DProps): JSX.Element => {
-    const { forceIgnoreMouse } = useForceIgnoreMouse();
     const { modelInfo, persistentAppearance } = useLive2DConfig();
-    const { mode } = useMode();
+    const { mode, forceIgnoreMouse } = useMode();
     const internalContainerRef = useRef<HTMLDivElement>(null);
     const { aiState } = useAiState();
     const { resetExpression } = useLive2DExpression();

@@ -76,6 +76,7 @@ enum LoadStep {
  * モデル生成、機能コンポーネント生成、更新処理とレンダリングの呼び出しを行う。
  */
 export class LAppModel extends CubismUserModel {
+  public userScale: number | undefined;
   /**
    * model3.jsonが置かれたディレクトリとファイルパスからモデルを生成する
    * @param dir
@@ -514,6 +515,7 @@ export class LAppModel extends CubismUserModel {
           if (this._textureCount >= textureCount) {
             // ロード完了
             this._state = LoadStep.CompleteSetup;
+            window.dispatchEvent(new Event("live2d-model-ready"));
           }
         };
 

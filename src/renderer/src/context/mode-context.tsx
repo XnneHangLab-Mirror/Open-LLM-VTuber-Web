@@ -7,12 +7,15 @@ interface ModeContextType {
   mode: ModeType;
   setMode: (mode: ModeType) => void;
   isElectron: boolean;
+  forceIgnoreMouse: boolean;
+  setForceIgnoreMouse: (forceIgnore: boolean) => void;
 }
 
 const ModeContext = createContext<ModeContextType | undefined>(undefined);
 
 export const ModeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [mode, setModeState] = useState<ModeType>('window');
+  const [forceIgnoreMouse, setForceIgnoreMouse] = useState(false);
   const isElectron = window.api !== undefined;
 
   const setMode = (newMode: ModeType) => {
@@ -72,7 +75,9 @@ export const ModeProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [isElectron]);
 
   return (
-    <ModeContext.Provider value={{ mode, setMode, isElectron }}>
+    <ModeContext.Provider
+      value={{ mode, setMode, isElectron, forceIgnoreMouse, setForceIgnoreMouse }}
+    >
       {children}
     </ModeContext.Provider>
   );
