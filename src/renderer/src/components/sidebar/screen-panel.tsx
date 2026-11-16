@@ -4,6 +4,7 @@ import { FiMonitor } from "react-icons/fi";
 import { useTranslation } from "react-i18next";
 import { Tooltip } from "@/components/ui/tooltip";
 import { sidebarStyles } from "./sidebar-styles";
+import { ScreenRecordControls } from './screen-record-controls';
 import { useCaptureScreen } from "@/hooks/sidebar/use-capture-screen";
 
 // Reusable components
@@ -112,6 +113,7 @@ function ScreenPanel(): JSX.Element {
           )}
         </Box>
       </Tooltip>
+      <ScreenRecordControls />
     </Box>
   );
 }

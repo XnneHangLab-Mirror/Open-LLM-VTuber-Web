@@ -29,6 +29,7 @@ import Background from "./components/canvas/background";
 import WebSocketStatus from "./components/canvas/ws-status";
 import Subtitle from "./components/canvas/subtitle";
 import { ModeProvider, useMode } from "./context/mode-context";
+import { ScreenRecordProvider } from './context/screen-record-context';
 import { MoodProvider } from "./context/mood-context";
 
 function AppContent(): JSX.Element {
@@ -186,7 +187,9 @@ function AppWithGlobalStyles(): JSX.Element {
                               <BrowserProvider>
                                 <WebSocketHandler>
                                   <Toaster />
-                                  <AppContent />
+                                  <ScreenRecordProvider>
+                                    <AppContent />
+                                  </ScreenRecordProvider>
                                 </WebSocketHandler>
                               </BrowserProvider>
                             </GroupProvider>
