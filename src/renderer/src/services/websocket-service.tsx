@@ -117,6 +117,17 @@ export interface MessageEvent {
   mixer_weights?: Partial<Record<PoseLayerId, number>>;
   mixer_weights_mode?: 'patch' | 'reset';
   idle_play?: IdlePlayCommand | string | null;
+  recording_state?: {
+    available: boolean;
+    recording: boolean;
+    remaining_seconds?: number;
+    idle_remaining_seconds?: number;
+    stop_reason?: string | null;
+    frames?: number;
+    error?: string | null;
+  };
+  error?: string | null;
+  action?: 'start' | 'stop' | 'status';
   browser_view?: {
     debuggerFullscreenUrl: string;
     debuggerUrl: string;
