@@ -166,6 +166,9 @@ export function InputSubtitle() {
                 aria-expanded={showRecording}
                 onClick={() => setShowRecording((shown) => !shown)}
                 {...inputSubtitleStyles.iconButton}
+                fontFamily="inherit"
+                fontSize="sm"
+                fontWeight="normal"
                 color={recordingState?.recording ? 'red.300' : 'whiteAlpha.900'}
                 bg={recordingState?.recording ? 'red.950' : 'whiteAlpha.100'}
                 px="2"

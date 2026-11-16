@@ -1,5 +1,7 @@
 import { SystemStyleObject } from '@chakra-ui/react';
 
+export const controlFontFamily = '"Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif';
+
 export const inputSubtitleStyles = {
   container: {
     display: 'flex',
@@ -18,6 +20,8 @@ export const inputSubtitleStyles = {
   },
 
   box: {
+    fontFamily: controlFontFamily,
+    fontWeight: 'normal',
     w: '500px',
     rounded: 'xl',
     overflow: 'hidden',
@@ -68,6 +72,8 @@ export const inputSubtitleStyles = {
   },
 
   input: {
+    fontFamily: controlFontFamily,
+    fontWeight: 'normal',
     size: 'sm',
     bg: 'blackAlpha.500',
     color: 'white',
