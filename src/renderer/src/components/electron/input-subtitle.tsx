@@ -160,16 +160,20 @@ export function InputSubtitle() {
             </Flex>
 
             <Flex gap="2">
-              <IconButton
+              <Button
                 aria-label="屏幕记录控制"
                 title={recordingState?.recording ? `屏幕记录中，剩余 ${recordingState.remaining_seconds ?? 0} 秒` : '屏幕记录控制'}
                 aria-expanded={showRecording}
                 onClick={() => setShowRecording((shown) => !shown)}
                 {...inputSubtitleStyles.iconButton}
-                color={recordingState?.recording ? 'red.300' : undefined}
+                color={recordingState?.recording ? 'red.300' : 'whiteAlpha.900'}
+                bg={recordingState?.recording ? 'red.950' : 'whiteAlpha.100'}
+                px="2"
+                gap="1"
               >
                 <LuMonitor size={16} />
-              </IconButton>
+                {recordingState?.recording ? '记录中' : '记录'}
+              </Button>
               <IconButton
                 aria-label="Toggle microphone"
                 onClick={handleMicToggle}
