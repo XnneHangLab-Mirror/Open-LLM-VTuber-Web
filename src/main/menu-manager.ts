@@ -2,6 +2,7 @@
 import {
   Tray, nativeImage, Menu, BrowserWindow, ipcMain, screen, MenuItemConstructorOptions, app,
 } from 'electron';
+import { screenRecordMenuItems, type ScreenRecordMenuState } from './screen-record-menu';
 // @ts-expect-error
 import trayIcon from '../../resources/icon.png?asset';
 
@@ -17,8 +18,20 @@ export class MenuManager {
 
   private configFiles: ConfigFile[] = [];
 
+  private recordingState: ScreenRecordMenuState = {};
+
+  private recordingTarget: Electron.WebContents | null = null;
+
+  private onRecordingState = (event: Electron.IpcMainEvent, state: ScreenRecordMenuState): void => {
+    if (!state || typeof state !== 'object') return;
+    this.recordingState = state;
+    this.recordingTarget = event.sender;
+    this.updateTrayMenu();
+  };
+
   constructor(private onModeChange: (mode: 'window' | 'pet') => void) {
     this.setupContextMenu();
+    ipcMain.on('screen-record-menu-state', this.onRecordingState);
   }
 
   createTray(): void {
@@ -60,6 +73,10 @@ export class MenuManager {
 
     const contextMenu = Menu.buildFromTemplate([
       ...this.getModeMenuItems(),
+      { type: 'separator' as const },
+      ...screenRecordMenuItems(this.recordingState, (action) => {
+        if (!this.recordingTarget?.isDestroyed()) this.recordingTarget?.send('screen-record-control', action);
+      }),
       { type: 'separator' as const },
       // Only show toggle mouse ignore in pet mode
       ...(this.currentMode === 'pet'
@@ -108,6 +125,8 @@ export class MenuManager {
 
   private getContextMenuItems(event: Electron.IpcMainEvent): MenuItemConstructorOptions[] {
     const template: MenuItemConstructorOptions[] = [
+      ...screenRecordMenuItems(this.recordingState, (action) => event.sender.send('screen-record-control', action)),
+      { type: 'separator' as const },
       {
         label: 'Toggle Microphone',
         click: () => {
@@ -205,6 +224,8 @@ export class MenuManager {
   }
 
   destroy(): void {
+    ipcMain.removeListener('screen-record-menu-state', this.onRecordingState);
+    this.recordingTarget = null;
     this.tray?.destroy();
     this.tray = null;
   }

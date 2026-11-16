@@ -1,5 +1,5 @@
 import {
-  LuBell, LuSend, LuMic, LuMicOff, LuHand, LuX,
+  LuBell, LuSend, LuMic, LuMicOff, LuHand, LuX, LuMonitor,
 } from 'react-icons/lu';
 import {
   Box,
@@ -17,6 +17,8 @@ import { inputSubtitleStyles } from './electron-style';
 import { useMode } from '@/context/mode-context';
 import { useMood } from '@/context/mood-context';
 import { PetBubble } from './pet-bubble';
+import { ScreenRecordControls } from '@/components/sidebar/screen-record-controls';
+import { useScreenRecording } from '@/context/screen-record-context';
 import ToolChainFloatingCard from './tool-chain-floating-card';
 
 function getMoodPresentation(score: number) {
@@ -66,6 +68,8 @@ export function InputSubtitle() {
   });
 
   const [isVisible, setIsVisible] = useState(true);
+  const [showRecording, setShowRecording] = useState(false);
+  const { state: recordingState } = useScreenRecording();
 
   const handleClose = useCallback(() => {
     if (isPet) {
@@ -157,6 +161,16 @@ export function InputSubtitle() {
 
             <Flex gap="2">
               <IconButton
+                aria-label="屏幕记录控制"
+                title={recordingState?.recording ? `屏幕记录中，剩余 ${recordingState.remaining_seconds ?? 0} 秒` : '屏幕记录控制'}
+                aria-expanded={showRecording}
+                onClick={() => setShowRecording((shown) => !shown)}
+                {...inputSubtitleStyles.iconButton}
+                color={recordingState?.recording ? 'red.300' : undefined}
+              >
+                <LuMonitor size={16} />
+              </IconButton>
+              <IconButton
                 aria-label="Toggle microphone"
                 onClick={handleMicToggle}
                 {...inputSubtitleStyles.iconButton}
@@ -173,6 +187,8 @@ export function InputSubtitle() {
             </Flex>
           </Flex>
         </Box>
+
+        {showRecording && <ScreenRecordControls />}
 
         <Box {...inputSubtitleStyles.inputBox}>
           <Stack direction="row" gap="2" p="2">
